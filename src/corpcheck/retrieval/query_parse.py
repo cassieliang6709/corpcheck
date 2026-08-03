@@ -40,9 +40,39 @@ _TRAILING_COMPANY_TOKENS = {
 _DOMAIN_COMPANY_TOKENS = {"com", "net", "org"}
 
 _TICKER_RE = re.compile(r"\b([A-Z]{2,5})\b")
-_YEAR_RE = re.compile(r"\b(20\d{2})\b")
-_YEAR_RANGE_RE = re.compile(r"\b(20\d{2})\s*(?:-|–|to)\s*(20\d{2})\b", re.IGNORECASE)
-_FISCAL_YEAR_RE = re.compile(r"\b(?:FY\s*20\d{2}|fiscal\s+year\s*20\d{2})\b", re.IGNORECASE)
+
+# Years are matched with digit lookarounds rather than \b. "FY2019" has no word
+# boundary between "Y" and "2" — both are word characters — so \b(20\d{2})\b
+# silently misses the notation analysts actually use. The lookarounds still
+# prevent matching inside a longer digit run such as an accession number.
+_YEAR_RE = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
+
+# "FY22" / "FY 22". Requires the FY prefix, so plain two-digit numbers elsewhere
+# in the question are not mistaken for years. The (?!\d) keeps it from firing on
+# the first two digits of a four-digit year.
+_SHORT_FISCAL_YEAR_RE = re.compile(r"\bFY\s?(\d{2})(?!\d)", re.IGNORECASE)
+
+# "Q2 2023" and the compact "Q22023" form that appears in filing shorthand.
+_QUARTER_YEAR_RE = re.compile(r"\bQ[1-4]\s?(20\d{2})(?!\d)", re.IGNORECASE)
+
+_YEAR_RANGE_RE = re.compile(
+    r"(?<!\d)(?:FY\s?)?(20\d{2})\s*(?:-|–|to|through|and)\s*(?:FY\s?)?(20\d{2})(?!\d)",
+    re.IGNORECASE,
+)
+_SHORT_YEAR_RANGE_RE = re.compile(
+    r"\bFY\s?(\d{2})\s*(?:-|–|to|through|and)\s*FY\s?(\d{2})(?!\d)",
+    re.IGNORECASE,
+)
+
+# Two-digit fiscal years are read as 20xx. SEC electronic filing makes anything
+# earlier irrelevant for this corpus, and modern financial writing ("FY22")
+# universally means the 2000s.
+_SHORT_YEAR_CENTURY = 2000
+# Accepts two- and four-digit fiscal years alike, so "FY22" is recognised as an
+# annual-period signal just as "FY2022" is.
+_FISCAL_YEAR_RE = re.compile(
+    r"\b(?:FY\s*\d{2,4}|fiscal\s+year\s*\d{2,4})\b", re.IGNORECASE
+)
 _ANNUAL_HINT_RE = re.compile(
     r"\b(?:annual|yearly|full.?year|year.?end)\b",
     re.IGNORECASE,
@@ -201,21 +231,42 @@ def detect_filing_type_hint_in_query(query: str) -> Optional[str]:
     return None
 
 
+def _expand_range(start: int, end: int, years: set[int]) -> None:
+    """Add every year in an inclusive range, ignoring implausibly large spans."""
+    if start > end:
+        start, end = end, start
+    # Keep expansion bounded to avoid boosting a span that covers the corpus.
+    if end - start <= 10:
+        years.update(range(start, end + 1))
+
+
 def detect_years_in_query(query: str) -> list[str]:
-    """Return distinct 20xx years mentioned directly or via small ranges."""
+    """Return distinct 20xx years mentioned in the query.
+
+    Handles the notations that appear in real analyst questions: bare ``2019``,
+    ``FY2019``, the two-digit ``FY19``, quarterly ``Q2 2023`` / ``Q22023``, and
+    ranges written either way (``FY2018 - FY2020``, ``FY20 to FY21``).
+    """
     years: set[int] = set()
 
     for start_text, end_text in _YEAR_RANGE_RE.findall(query):
-        start = int(start_text)
-        end = int(end_text)
-        if start > end:
-            start, end = end, start
-        # Keep expansion bounded to avoid boosting implausibly large spans.
-        if end - start <= 10:
-            years.update(range(start, end + 1))
+        _expand_range(int(start_text), int(end_text), years)
+
+    for start_text, end_text in _SHORT_YEAR_RANGE_RE.findall(query):
+        _expand_range(
+            _SHORT_YEAR_CENTURY + int(start_text),
+            _SHORT_YEAR_CENTURY + int(end_text),
+            years,
+        )
 
     for match in _YEAR_RE.findall(query):
         years.add(int(match))
+
+    for match in _QUARTER_YEAR_RE.findall(query):
+        years.add(int(match))
+
+    for match in _SHORT_FISCAL_YEAR_RE.findall(query):
+        years.add(_SHORT_YEAR_CENTURY + int(match))
 
     return [str(year) for year in sorted(years)]
 
