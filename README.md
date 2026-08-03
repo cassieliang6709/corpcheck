@@ -76,9 +76,61 @@ The corpus lives in PostgreSQL with pgvector. Schema is in
 `v_retrieval_chunks` view, which unions SEC filing chunks, news chunks, and
 earnings-call transcript chunks behind one interface.
 
+## Evaluation
+
+Retrieval quality is measured deterministically against FinanceBench, in-process
+against `retrieve()` — no HTTP server and no LLM, so a change in the numbers is
+attributable to retrieval alone.
+
+```bash
+.venv/bin/python -m evaluation.ir_eval --label baseline
+```
+
+Reports `Recall@{1,3,5,10}`, `Hit@k`, and `MRR@10`, plus ablations and a
+threshold sweep. Per-query detail lands in `evaluation/runs/<label>/`, so two
+configurations can be diffed directly.
+
+**How a hit is defined.** FinanceBench gives a gold evidence *span* — a page or
+table lifted from the filing — not a chunk id. Our chunk boundaries differ, so
+exact matching is impossible. A retrieved chunk counts as covering a gold span
+when it contains at least `--threshold` (default 0.5) of that span's
+content-bearing tokens, after normalisation, boilerplate removal, and stopword
+removal. Numbers keep their thousands separators collapsed (`11,588` → `11588`)
+because the exact figure is the most discriminative token in a filing table.
+
+Two rules keep the measurement honest:
+
+- **No gold metadata reaches the retriever.** Only the question text is passed —
+  never the benchmark's company, period, or filing type. Supplying those as
+  filters would benchmark a system that does not exist at serving time.
+- **Provenance is checked before content.** A chunk must come from the filing the
+  question is about before its overlap counts, because the right sentence from
+  the wrong fiscal year is exactly the failure this project exists to prevent.
+  `--no-doc-gate` shows what the gate costs.
+
+### Validating the metric itself
+
+A weak-supervision metric can read zero because retrieval is bad *or* because the
+threshold is unreachable given the chunk size. To tell those apart:
+
+```bash
+.venv/bin/python -m evaluation.oracle
+```
+
+This computes the best overlap achievable by any chunk of the correct filing —
+perfect oracle retrieval — and reports the resulting ceiling per threshold. Run
+it whenever the corpus or the chunking strategy changes. Any `ir_eval` result
+above the ceiling indicates a scoring bug.
+
 ## Status
 
 Ported from the prior `NLP-project` codebase with the service layer restructured
-into a proper package. Behavior is unchanged from the port; the Phase 1 patches
-(IR evaluation, revision-aware filtering, RRF fusion, abstain gating) are in
-progress.
+into a proper package; behavior is unchanged from the port.
+
+Phase 1 progress:
+
+- [x] **Deterministic IR evaluation suite** — `Recall@k` / `MRR` with token-overlap
+      weak supervision, provenance gating, and an oracle ceiling check.
+- [ ] Revision-aware filtering (`10-K/A` supersedes `10-K`)
+- [ ] Reciprocal Rank Fusion for hybrid search
+- [ ] Strict abstain gating

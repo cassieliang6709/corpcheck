@@ -20,6 +20,10 @@ class ChunkResult(BaseModel):
     company: str
     sector: Optional[str] = None
     filing_type: Optional[str] = None
+    # Provenance: which filing period this chunk came from. Needed to verify that
+    # evidence is attributable to the document the question is actually about.
+    fiscal_year: Optional[int] = None
+    period_label: Optional[str] = None
     filed_date: Optional[date] = None
     source_url: Optional[str] = None
     article_title: Optional[str] = None

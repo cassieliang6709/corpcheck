@@ -137,6 +137,8 @@ async def retrieve(
                 company=row["company"],
                 sector=row["sector"],
                 filing_type=ft,
+                fiscal_year=row.get("fiscal_year"),
+                period_label=row.get("period_label"),
                 filed_date=row.get("filed_date"),
                 source_url=row.get("source_url"),
                 article_title=compose_article_title(row) or None,

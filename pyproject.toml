@@ -59,3 +59,12 @@ src = ["src", "evaluation", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# The codebase consistently uses typing.Optional/Union rather than PEP 604 `X | None`.
+# Enforcing the newer style would mean rewriting every ported module for no
+# behavioural gain, so the existing convention is kept.
+ignore = ["UP007", "UP035", "UP045"]
+
+[tool.ruff.lint.per-file-ignores]
+# pipeline.py deliberately configures logging before importing heavy modules,
+# so its imports cannot all sit at the top of the file.
+"src/corpcheck/ingestion/pipeline.py" = ["E402"]

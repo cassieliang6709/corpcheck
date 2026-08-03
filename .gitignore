@@ -45,3 +45,4 @@ Thumbs.db
 .venv/
 .env
 evaluation/runs/
+evaluation/runs/*/queries.jsonl
