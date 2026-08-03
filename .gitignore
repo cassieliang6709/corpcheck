@@ -1,0 +1,47 @@
+# ── Data (share via Google Drive, not git) ───────────────────────────────────
+data/
+sec-edgar-filings/
+*.jsonl
+*.npy
+*.pgdump
+*.csv
+
+# Raw SEC filing formats
+*.htm
+*.html
+*.xml
+*.xbrl
+
+# Logs
+logs/
+*.log
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.venv/
+.venv-py39-backup/
+venv/
+env/
+
+# ── Jupyter ──────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ── Secrets / env ────────────────────────────────────────────────────────────
+secrets.json
+config_local.py
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Project-local ────────────────────────────────────────────────────────────
+.venv/
+.env
+evaluation/runs/

@@ -1,0 +1,136 @@
+import unittest
+
+from corpcheck.ingestion.processors.html_cleaner import HTMLCleaner
+
+
+class HTMLCleanerTableTests(unittest.TestCase):
+    def test_clean_text_serializes_html_table_into_structured_lines(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K")
+        html = """
+        <html>
+          <body>
+            <h1>ITEM 8. Financial Statements</h1>
+            <p>Summary of results.</p>
+            <table>
+              <caption>Consolidated Statements of Operations</caption>
+              <tr><th>Year</th><th>Revenue</th></tr>
+              <tr><td>2023</td><td>$22,680</td></tr>
+              <tr><td>2022</td><td>$23,601</td></tr>
+            </table>
+          </body>
+        </html>
+        """
+
+        sections = cleaner.clean_text(html, filing_type="10-K")
+        self.assertTrue(sections)
+
+        self.assertTrue(sections)
+        fs_text = sections[0][1]
+        self.assertIn("[TABLE] Consolidated Statements of Operations", fs_text)
+        self.assertIn("[HEADER] Year | Revenue", fs_text)
+        self.assertIn("[ROW] 2023 | $22,680", fs_text)
+        self.assertIn("[ROW] 2022 | $23,601", fs_text)
+        self.assertIn("[/TABLE]", fs_text)
+
+    def test_clean_text_promotes_single_row_item_tables_into_sections(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html>
+          <body>
+            <p>INDEX</p>
+            <table>
+              <tr><td>Item 1.</td><td>Business</td><td>3</td></tr>
+              <tr><td>Item 7.</td><td>Management's Discussion and Analysis</td><td>20</td></tr>
+            </table>
+            <table>
+              <tr><td>Item 1.</td><td>Business</td></tr>
+            </table>
+            <p>Business overview paragraph.</p>
+            <table>
+              <tr><td>Item 7.</td><td>Management's Discussion and Analysis</td></tr>
+            </table>
+            <p>MD&A paragraph.</p>
+          </body>
+        </html>
+        """
+
+        sections = cleaner.clean_text(html, filing_type="10-K")
+        section_names = [section_name for section_name, _ in sections]
+
+        self.assertIn("Business Description", section_names)
+        self.assertIn("MD&A", section_names)
+        self.assertNotIn("Full Document", section_names)
+
+    def test_clean_text_falls_back_to_generic_heading_lines(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html>
+          <body>
+            <p>Forward-looking preamble.</p>
+            <div></div>
+            <div></div>
+            <div>Risk Factors</div>
+            <div></div>
+            <p>Risk discussion paragraph.</p>
+            <div></div>
+            <div></div>
+            <div>Controls and Procedures</div>
+            <div></div>
+            <p>Controls paragraph.</p>
+          </body>
+        </html>
+        """
+
+        sections = cleaner.clean_text(html, filing_type="10-K")
+        section_names = [section_name for section_name, _ in sections]
+
+        self.assertIn("Risk Factors", section_names)
+        self.assertIn("Controls and Procedures", section_names)
+        self.assertNotIn("Full Document", section_names)
+
+    def test_clean_text_maps_business_heading_to_business_description(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html>
+          <body>
+            <p>Introductory text.</p>
+            <div></div>
+            <div></div>
+            <div>Business</div>
+            <div></div>
+            <p>Business overview paragraph.</p>
+            <div></div>
+            <div></div>
+            <div>Risk Factors</div>
+            <div></div>
+            <p>Risk paragraph.</p>
+          </body>
+        </html>
+        """
+
+        sections = cleaner.clean_text(html, filing_type="10-K")
+        section_names = [section_name for section_name, _ in sections]
+
+        self.assertIn("Business Description", section_names)
+        self.assertIn("Risk Factors", section_names)
+
+    def test_remove_cover_page_does_not_trim_to_late_exhibit_item(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-Q", min_section_length=1)
+        text = (
+            "UNITED STATES SECURITIES AND EXCHANGE COMMISSION\n"
+            "Washington, D.C. 20549\n"
+            "FORM 10-Q\n"
+            + ("Cover boilerplate\n" * 400)
+            + "\nOverview\nQuarterly overview paragraph.\n"
+            + ("Body text\n" * 500)
+            + "\nItem 6. Exhibits\nExhibit list paragraph.\n"
+        )
+
+        trimmed = cleaner._remove_cover_page(text)
+
+        self.assertEqual(trimmed, text)
+        self.assertIn("Overview", trimmed)
+
+
+if __name__ == "__main__":
+    unittest.main()
