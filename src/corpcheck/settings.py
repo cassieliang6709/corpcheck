@@ -84,10 +84,18 @@ REVISION_FILTER_ENABLED: bool = _env_bool("REVISION_FILTER_ENABLED", True)
 FUSION_STRATEGY: str = os.getenv("FUSION_STRATEGY", "rrf").lower()
 RRF_K: int = _env_int("RRF_K", 60)
 
-# Double-threshold abstain gating: abstain from answering if retrieval confidence
-# falls below these thresholds (prevents hallucinating on low-relevance context).
-ABSTAIN_TOP1_MIN: float = _env_float("ABSTAIN_TOP1_MIN", 0.35)
-ABSTAIN_MEAN_TOP3_MIN: float = _env_float("ABSTAIN_MEAN_TOP3_MIN", 0.25)
+# Double-threshold abstain gating. These are floors on the raw, unboosted dense
+# cosine similarity (ChunkResult.cos_sim) — NOT on the fused ranking score, which
+# is min-max normalised and therefore always 1.0 at rank 1 regardless of
+# relevance. See retrieval/abstain.py for why, and evaluation/calibrate_abstain.py
+# for the measurement these defaults come from.
+#
+# Calibrated on all-MiniLM-L6-v2 over this corpus: in-domain queries bottom out
+# at top1=0.566 / mean3=0.554, out-of-domain queries top out at 0.342 / 0.335.
+# The defaults sit in that gap, nearer the out-of-domain edge. Re-run the
+# calibration if the embedding model or the corpus changes.
+ABSTAIN_TOP1_MIN: float = _env_float("ABSTAIN_TOP1_MIN", 0.42)
+ABSTAIN_MEAN_TOP3_MIN: float = _env_float("ABSTAIN_MEAN_TOP3_MIN", 0.40)
 
 
 # ---------------------------------------------------------------------------

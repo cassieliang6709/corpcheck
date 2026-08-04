@@ -17,6 +17,13 @@ class ChunkResult(BaseModel):
     chunk_id: str
     text: str
     score: float
+    # Unboosted dense cosine similarity, carried through fusion untouched.
+    # ``score`` above is a fused, min-max-normalised, rerank-adjusted number and
+    # is only meaningful *relative* to the other rows in the same response;
+    # ``cos_sim`` is the one field on the row that survives on an absolute
+    # scale, which is what makes confidence gating possible. None when the chunk
+    # was found only by the sparse arm.
+    cos_sim: Optional[float] = None
     company: str
     sector: Optional[str] = None
     filing_type: Optional[str] = None
@@ -60,3 +67,9 @@ class ChatResponse(BaseModel):
     answer: str
     thinking: Optional[str] = None
     chunks: list[ChunkResult]
+    # True when the retrieval-confidence gate declined before the LLM was
+    # consulted. ``answer`` then holds the refusal text and ``chunks`` still
+    # carries what was retrieved, so a caller can show the user the evidence
+    # that was judged insufficient. Defaults keep existing clients working.
+    abstained: bool = False
+    abstain_reason: Optional[str] = None

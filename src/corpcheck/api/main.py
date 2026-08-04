@@ -1,5 +1,6 @@
 import hmac
 import json
+import logging
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -18,6 +19,9 @@ from corpcheck.models import (
     RetrieveResponse,
 )
 from corpcheck.retrieval import load_known_tickers, retrieve
+from corpcheck.retrieval.abstain import evaluate_confidence
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -126,6 +130,36 @@ async def chat_endpoint(req: ChatRequest, request: Request):
         filing_type=req.filing_type,
         fiscal_year=req.year,
     )
+
+    # Confidence gate. This runs before the LLM is contacted at all: if the
+    # retrieved evidence is too weak, the correct output is a refusal, and
+    # sending the context anyway would only invite a fluent guess. Sources are
+    # still returned so the user can see what *was* found and judge for
+    # themselves.
+    decision = evaluate_confidence(chunks)
+    if decision:
+        logger.info(
+            "Abstained on query %r (%s)", req.query[:120], decision.detail
+        )
+        if req.stream:
+
+            async def abstain_gen():
+                yield {
+                    "event": "chunks",
+                    "data": json.dumps([c.model_dump(mode="json") for c in chunks]),
+                }
+                yield {"event": "abstain", "data": json.dumps({"reason": decision.reason})}
+                yield {"event": "done", "data": ""}
+
+            return EventSourceResponse(abstain_gen(), ping=15)
+
+        return ChatResponse(
+            answer=decision.reason,
+            thinking="",
+            chunks=chunks,
+            abstained=True,
+            abstain_reason=decision.reason,
+        )
 
     if req.stream:
 

@@ -148,11 +148,17 @@ async def retrieve(
         source_type = row.get("source_type") or "sec"
 
         ft = row.get("filing_type") or ""
+        # Read from vec_map specifically: cos_sim only exists on the dense arm's
+        # rows, and `row` may have come from bm25_map.
+        dense_row = vec_map.get(cid)
+        cos_sim = dense_row.get("cos_sim") if dense_row else None
+
         results.append(
             ChunkResult(
                 chunk_id=cid,
                 text=row["text"],
                 score=round(score, 6),
+                cos_sim=round(float(cos_sim), 6) if cos_sim is not None else None,
                 company=row["company"],
                 sector=row["sector"],
                 filing_type=ft,

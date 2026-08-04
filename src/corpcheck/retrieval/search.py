@@ -146,9 +146,16 @@ async def vector_search(
     boost_expr, boost_vals, _ = build_boost_expression(
         boost_ticker, boost_filing_type, boost_years or [], start_idx=3 + len(filter_params)
     )
+    # cos_sim is the same similarity without the metadata boost applied. The
+    # boosted score_v decides *which* rows come back and in what order; cos_sim
+    # is the only column on the row that still means something on an absolute
+    # scale, so it is what the abstain gate reads. Boosting can multiply a score
+    # by up to COMPANY_BOOST * FILING_TYPE_BOOST * FISCAL_YEAR_BOOST, which
+    # would make any absolute threshold on score_v meaningless.
     sql = f"""
         SELECT
 {_SELECT_COLUMNS},
+            (1 - (embedding <=> $1::vector))                      AS cos_sim,
             (1 - (embedding <=> $1::vector)) * {boost_expr}       AS score_v
         FROM v_retrieval_chunks
         WHERE embedding IS NOT NULL
@@ -176,9 +183,14 @@ async def bm25_search(
     boost_expr, boost_vals, _ = build_boost_expression(
         boost_ticker, boost_filing_type, boost_years or [], start_idx=3 + len(filter_params)
     )
+    # bm25_raw mirrors cos_sim on the dense side: the unboosted score, kept for
+    # observability and eval. It is deliberately *not* used as an absolute
+    # abstain threshold — ts_rank varies with query term count and document
+    # length, so a one-word query scores low whether or not it matched well.
     sql = f"""
         SELECT
 {_SELECT_COLUMNS},
+            ts_rank(content_tsv, plainto_tsquery('english', $1)) AS bm25_raw,
             ts_rank(content_tsv, plainto_tsquery('english', $1)) * {boost_expr} AS score_b
         FROM v_retrieval_chunks
         WHERE content_tsv @@ plainto_tsquery('english', $1)
