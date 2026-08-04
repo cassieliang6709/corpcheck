@@ -122,15 +122,44 @@ perfect oracle retrieval — and reports the resulting ceiling per threshold. Ru
 it whenever the corpus or the chunking strategy changes. Any `ir_eval` result
 above the ceiling indicates a scoring bug.
 
-## Status
+## Background and attribution
 
-Ported from the prior `NLP-project` codebase with the service layer restructured
-into a proper package; behavior is unchanged from the port.
+CorpCheck grew out of [`CS6120_finance_RAG`](https://github.com/cassieliang6709/CS6120_finance_RAG),
+a four-person project built for CS6120 (Natural Language Processing) at
+Northeastern University by
+[@RobynJiang](https://github.com/RobynJiang),
+[@zhiyul1998](https://github.com/zhiyul1998),
+[@CodeBusher](https://github.com/CodeBusher),
+and [@cassieliang6709](https://github.com/cassieliang6709).
+That project established the original idea: ingest SEC filings, retrieve over
+them, and ground generated answers in the retrieved evidence.
+
+This repository is a solo continuation. It is a separate project rather than a
+branch of the original, so that the coursework repository stays intact for the
+team that built it.
+
+The work here is a rewrite rather than an increment: the service layer was
+restructured into an installable package, and the parts that make the system
+defensible for financial use were designed and built from scratch — the
+deterministic IR evaluation harness, revision-aware filtering, rank-based
+fusion, and the abstain gate. Where the course project answered *can we build
+a RAG system over 10-Ks*, CorpCheck asks the harder question: *can we prove the
+retrieval is correct, and make the system refuse when it is not*.
+
+Ideas, structure, and problem framing from the original team are gratefully
+acknowledged.
+
+## Status
 
 Phase 1 progress:
 
 - [x] **Deterministic IR evaluation suite** — `Recall@k` / `MRR` with token-overlap
       weak supervision, provenance gating, and an oracle ceiling check.
-- [ ] Revision-aware filtering (`10-K/A` supersedes `10-K`)
-- [ ] Reciprocal Rank Fusion for hybrid search
-- [ ] Strict abstain gating
+- [x] **Revision-aware filtering** — `10-K/A` supersedes the `10-K` it amends;
+      resolved on the candidate pool before fusion.
+- [x] **Reciprocal Rank Fusion** — rank-based hybrid fusion, A/B-switchable
+      against the previous min-max blend.
+- [x] **Strict abstain gating** — `/chat` refuses before contacting the LLM when
+      the retrieved evidence is too weak. Gated on raw dense cosine rather than
+      the fused score, with thresholds calibrated against the corpus
+      (`evaluation/calibrate_abstain.py`).
