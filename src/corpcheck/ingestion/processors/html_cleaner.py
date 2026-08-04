@@ -51,18 +51,31 @@ SECTION_MAP_10K: dict[str, str] = {
     "item 15": "Exhibits",
 }
 
-SECTION_MAP_10Q: dict[str, str] = {
+# A 10-Q numbers its items from 1 in both Part I and Part II, so the item
+# number alone is ambiguous.  Keep one table per Part and resolve using the
+# ``PART <roman>`` heading in effect at the item's position in the document.
+SECTION_MAP_10Q_PART_I: dict[str, str] = {
     "item 1": "Financial Statements",
     "item 2": "MD&A",
     "item 3": "Quantitative and Qualitative Disclosures about Market Risk",
     "item 4": "Controls and Procedures",
-    "item 1 legal": "Legal Proceedings",
+}
+
+SECTION_MAP_10Q_PART_II: dict[str, str] = {
+    "item 1": "Legal Proceedings",
     "item 1a": "Risk Factors",
-    "item 2 issuer": "Unregistered Sales of Equity Securities",
+    "item 2": "Unregistered Sales of Equity Securities",
     "item 3": "Defaults upon Senior Securities",
     "item 4": "Mine Safety Disclosures",
     "item 5": "Other Information",
     "item 6": "Exhibits",
+}
+
+# Used when no Part heading precedes the item: Part I wins for the overlapping
+# numbers 1-4, and Part II supplies the items that only exist there (1a, 5, 6).
+SECTION_MAP_10Q: dict[str, str] = {
+    **SECTION_MAP_10Q_PART_II,
+    **SECTION_MAP_10Q_PART_I,
 }
 
 SECTION_MAP_8K: dict[str, str] = {
@@ -140,6 +153,14 @@ _ITEM_HEADER_RE = re.compile(
     re.I | re.M,
 )
 
+# Matches "PART II", "PART I — FINANCIAL INFORMATION", "Part I." etc.  The
+# optional title must start with a capital so prose such as
+# "part ii of this report" is not mistaken for a heading.
+_PART_HEADER_RE = re.compile(
+    r"^\s*PART\s+(IV|III|II|I)\b(?:[\s\.\-–—:]+([A-Z][^\n]{0,60}?))?\s*$",
+    re.I | re.M,
+)
+
 _HEADING_ALIAS_MAP_10K: dict[str, str] = {
     "business": "Business Description",
     "management’s discussion and analysis of financial condition and results of operations": "MD&A",
@@ -180,16 +201,42 @@ def _normalize_item(raw: str) -> str:
     return raw
 
 
-def _map_section(item_label: str, filing_type: str) -> str:
+def _find_part_markers(text: str) -> list[tuple[int, str]]:
+    """Return ``(offset, part)`` for every ``PART <roman>`` heading in *text*."""
+    return [(m.start(), m.group(1).upper()) for m in _PART_HEADER_RE.finditer(text)]
+
+
+def _part_for_offset(part_markers: list[tuple[int, str]], offset: int) -> str | None:
+    """Return the Part heading in effect at *offset*, or None if there is none."""
+    part: str | None = None
+    for start, label in part_markers:
+        if start > offset:
+            break
+        part = label
+    return part
+
+
+def _map_section(item_label: str, filing_type: str, part: str | None = None) -> str:
     """
     Map an item label to a human-readable section name.
-    Returns the raw item label if no mapping is found.
+
+    *part* is the roman numeral of the ``PART`` heading the item appears under
+    (10-Q only); it disambiguates the item numbers that Part I and Part II
+    share.  Returns the raw item label if no mapping is found.
     """
     key = _normalize_item(item_label)
     if filing_type == "10-K":
         return SECTION_MAP_10K.get(key, item_label.title())
     elif filing_type == "10-Q":
-        return SECTION_MAP_10Q.get(key, item_label.title())
+        if part == "I":
+            part_map = SECTION_MAP_10Q_PART_I
+        elif part == "II":
+            part_map = SECTION_MAP_10Q_PART_II
+        else:
+            part_map = SECTION_MAP_10Q
+        # An item missing from its own Part (e.g. Part I has no Item 5) still
+        # falls back to the merged table rather than degrading to "Item 5".
+        return part_map.get(key) or SECTION_MAP_10Q.get(key, item_label.title())
     elif filing_type == "8-K":
         return SECTION_MAP_8K.get(key, item_label.title())
     return item_label.title()
@@ -701,10 +748,16 @@ class HTMLCleaner:
         if not matches:
             return self._split_generic_headings(text)
 
+        part_markers = _find_part_markers(text) if self.filing_type == "10-Q" else []
+
         sections: list[tuple[str, str]] = []
         for i, m in enumerate(matches):
             item_label = m.group(1)
-            section_name = _map_section(item_label, self.filing_type)
+            section_name = _map_section(
+                item_label,
+                self.filing_type,
+                _part_for_offset(part_markers, m.start()),
+            )
             start = m.end()
             end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
             section_text = text[start:end].strip()
