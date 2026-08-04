@@ -46,3 +46,6 @@ Thumbs.db
 .env
 evaluation/runs/
 evaluation/runs/*/queries.jsonl
+
+# The *.html rule above targets downloaded SEC filings, not the landing page.
+!landing/*.html
