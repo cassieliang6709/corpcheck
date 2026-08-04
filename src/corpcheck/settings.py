@@ -24,6 +24,19 @@ def _env_int(name: str, default: int) -> int:
     return int(os.getenv(name, str(default)))
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse a boolean env var. Anything unrecognised falls back to ``default``."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 # ---------------------------------------------------------------------------
 # Embeddings
 # ---------------------------------------------------------------------------
@@ -60,6 +73,22 @@ DEFAULT_ALPHA: float = _env_float("DEFAULT_ALPHA", 0.7)
 COMPANY_BOOST: float = _env_float("COMPANY_BOOST", 1.5)
 FILING_TYPE_BOOST: float = _env_float("FILING_TYPE_BOOST", 1.3)
 FISCAL_YEAR_BOOST: float = _env_float("FISCAL_YEAR_BOOST", 1.3)
+
+# Drop chunks from filings that a later amendment has superseded (a 10-K/A
+# replaces the 10-K it amends). On by default: serving a figure the filer has
+# since restated is the most damaging error this system can make. Exposed as a
+# toggle so the IR suite can measure what the filter costs in recall.
+REVISION_FILTER_ENABLED: bool = _env_bool("REVISION_FILTER_ENABLED", True)
+
+# Hybrid search fusion strategy: "rrf" (Reciprocal Rank Fusion) or "minmax"
+FUSION_STRATEGY: str = os.getenv("FUSION_STRATEGY", "rrf").lower()
+RRF_K: int = _env_int("RRF_K", 60)
+
+# Double-threshold abstain gating: abstain from answering if retrieval confidence
+# falls below these thresholds (prevents hallucinating on low-relevance context).
+ABSTAIN_TOP1_MIN: float = _env_float("ABSTAIN_TOP1_MIN", 0.35)
+ABSTAIN_MEAN_TOP3_MIN: float = _env_float("ABSTAIN_MEAN_TOP3_MIN", 0.25)
+
 
 # ---------------------------------------------------------------------------
 # LLM (OpenAI-compatible SGLang endpoint, backend-only — never exposed to clients)
