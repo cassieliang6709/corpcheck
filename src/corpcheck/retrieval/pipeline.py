@@ -13,7 +13,7 @@ from typing import Optional
 import asyncpg
 
 from corpcheck.models import ChunkResult
-from corpcheck.retrieval.fusion import fuse_scores, minmax_normalize
+from corpcheck.retrieval.fusion import fuse_candidates, minmax_normalize
 from corpcheck.retrieval.query_parse import (
     detect_company_in_query,
     detect_filing_type_hint_in_query,
@@ -25,12 +25,18 @@ from corpcheck.retrieval.query_parse import (
     sanitize_bm25_query,
 )
 from corpcheck.retrieval.rerank import compose_article_title, compute_rerank_bonus
+from corpcheck.retrieval.revision import (
+    filter_superseded_rows,
+    load_superseded_filings,
+    log_dropped,
+)
 from corpcheck.retrieval.search import (
     bm25_search,
     build_filter_clause,
     embed_query,
     vector_search,
 )
+from corpcheck.settings import FUSION_STRATEGY, REVISION_FILTER_ENABLED, RRF_K
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +50,10 @@ async def retrieve(
     company: Optional[str],
     filing_type: Optional[str],
     fiscal_year: Optional[int] = None,
+    fusion_strategy: Optional[str] = None,
 ) -> list[ChunkResult]:
     """Return the top-``k`` chunks for ``query`` under the given metadata filters."""
+    strat = fusion_strategy or FUSION_STRATEGY
     resolved_company = resolve_company_filter(company)
     detected_company = None if resolved_company else detect_company_in_query(query)
     query_vec = embed_query(query)
@@ -89,19 +97,28 @@ async def retrieve(
         ),
     )
 
+    # Supersession is resolved here — after candidate generation, before fusion.
+    # Filtering the candidate pool (rather than the final top-k) lets surviving
+    # chunks move up and fill the vacated slots, so the caller still gets k results.
+    if REVISION_FILTER_ENABLED:
+        superseded = await load_superseded_filings(pool, vec_rows + bm25_rows)
+        vec_rows, dropped_vec = filter_superseded_rows(vec_rows, superseded)
+        bm25_rows, dropped_bm25 = filter_superseded_rows(bm25_rows, superseded)
+        log_dropped(dropped_vec + dropped_bm25)
+
     vec_map: dict[str, dict] = {r["chunk_id"]: r for r in vec_rows}
     bm25_map: dict[str, dict] = {r["chunk_id"]: r for r in bm25_rows}
     all_ids = list({**vec_map, **bm25_map}.keys())
 
-    raw_v = [vec_map[cid]["score_v"] if cid in vec_map else 0.0 for cid in all_ids]
-    raw_b = [bm25_map[cid]["score_b"] if cid in bm25_map else 0.0 for cid in all_ids]
+    # Fused base scores using specified fusion strategy ("rrf" or "minmax")
+    fused_scores = fuse_candidates(
+        vec_rows, bm25_rows, alpha=alpha, strategy=strat, k_rrf=RRF_K
+    )
+
     raw_d = [
         float((vec_map.get(cid) or bm25_map.get(cid) or {}).get("data_signal_score") or 0.0)
         for cid in all_ids
     ]
-
-    norm_v = minmax_normalize(raw_v) if vec_rows else [0.0] * len(all_ids)
-    norm_b = minmax_normalize(raw_b) if bm25_rows else [0.0] * len(all_ids)
     norm_d = minmax_normalize(raw_d) if needs_quant and raw_d else [0.0] * len(all_ids)
 
     scored = []
@@ -109,8 +126,9 @@ async def retrieve(
         row = vec_map.get(cid) or bm25_map.get(cid)
         source_type = row.get("source_type") or "sec"
         content_kind = row.get("content_kind")
+        fused_score = fused_scores.get(cid, 0.0)
         final_score = (
-            fuse_scores(norm_v[i], norm_b[i], alpha)
+            fused_score
             + (0.15 * norm_d[i] if needs_quant else 0.0)
             + compute_rerank_bonus(
                 needs_quant=needs_quant,
@@ -121,6 +139,7 @@ async def retrieve(
         )
         scored.append((final_score, cid))
     scored.sort(reverse=True)
+
 
     results: list[ChunkResult] = []
     for score, cid in scored[:k]:

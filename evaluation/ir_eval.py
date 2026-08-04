@@ -226,6 +226,7 @@ async def run_retrieval(
     k: int,
     alpha: float,
     match_quarter: bool,
+    fusion_strategy: Optional[str] = None,
 ) -> list[QueryRecord]:
     """Retrieve for every benchmark row and build its evaluation record."""
     pool = await get_pool()
@@ -247,6 +248,7 @@ async def run_retrieval(
                     company=None,
                     filing_type=None,
                     fiscal_year=None,
+                    fusion_strategy=fusion_strategy,
                 )
                 latency_ms = round((time.perf_counter() - started) * 1000)
                 record = build_query_record(
@@ -272,6 +274,7 @@ async def run_retrieval(
         await close_pool()
 
     return records
+
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +419,12 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p.add_argument("--k", type=int, default=10, help="Chunks to retrieve per query")
     p.add_argument("--alpha", type=float, default=0.7, help="Dense/sparse blend weight")
     p.add_argument(
+        "--fusion-strategy",
+        choices=["rrf", "minmax"],
+        default=None,
+        help="Fusion strategy to use ('rrf' or 'minmax')",
+    )
+    p.add_argument(
         "--threshold",
         type=float,
         default=DEFAULT_THRESHOLD,
@@ -462,9 +471,11 @@ def main(argv: Optional[list[str]] = None) -> int:
                 k=args.k,
                 alpha=args.alpha,
                 match_quarter=not args.no_quarter_match,
+                fusion_strategy=args.fusion_strategy,
             )
         )
     except OSError as exc:
+
         print(
             f"Could not reach Postgres ({exc}). Start the database and retry.",
             file=sys.stderr,
