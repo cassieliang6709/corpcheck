@@ -40,6 +40,7 @@ from typing import Any, Optional
 from corpcheck.db import close_pool, get_pool
 from corpcheck.models import ChunkResult
 from corpcheck.retrieval import load_known_tickers, retrieve
+from corpcheck.retrieval.search import get_model
 from evaluation.financebench import GoldDoc, chunk_matches_gold_doc, gold_spans, parse_gold_doc
 from evaluation.metrics import (
     THRESHOLD_SWEEP_DEFAULT,
@@ -231,6 +232,13 @@ async def run_retrieval(
     """Retrieve for every benchmark row and build its evaluation record."""
     pool = await get_pool()
     await load_known_tickers(pool)
+
+    # Load the embedding model up front. It is loaded lazily inside the retrieval
+    # path, so a transient failure -- a flaky HuggingFace Hub call, say -- would
+    # otherwise be caught by the per-query handler and turn into a silent block of
+    # errored queries that are quietly excluded from every metric. Failing here
+    # instead makes a broken run impossible to mistake for a bad result.
+    get_model()
 
     records: list[QueryRecord] = []
     try:
