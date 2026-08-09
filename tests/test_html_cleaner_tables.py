@@ -4,6 +4,77 @@ from corpcheck.ingestion.processors.html_cleaner import HTMLCleaner
 
 
 class HTMLCleanerTableTests(unittest.TestCase):
+    def test_incorporated_annual_report_supplies_financial_statement_tables(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        submission = """
+        <DOCUMENT>
+        <TYPE>10-K
+        <TEXT><html><body>
+          <p>ITEM 8. Financial Statements and Supplementary Data</p>
+          <p>The financial statements in the Annual Report are incorporated by reference.</p>
+          <p>ITEM 9. Changes in and Disagreements with Accountants</p>
+          <p>There were no disagreements.</p>
+        </body></html>
+        </DOCUMENT>
+        <DOCUMENT>
+        <TYPE>EX-13.1
+        <TEXT><html><body>
+          <h1>Financial Statements and Supplementary Data</h1>
+          <p>Audited consolidated results follow.</p>
+          <table>
+            <caption>Consolidated Statements of Operations</caption>
+            <tr><th>In millions</th><th>2018</th><th>2017</th></tr>
+            <tr><td>Total revenues</td><td>194,579</td><td>184,786</td></tr>
+          </table>
+          <table>
+            <caption>Consolidated Balance Sheets</caption>
+            <tr><th>In millions</th><th>2018</th><th>2017</th></tr>
+            <tr><td>Property and equipment, net</td><td>11,349</td><td>10,292</td></tr>
+          </table>
+        </body></html>
+        </DOCUMENT>
+        <DOCUMENT>
+        <TYPE>EX-99.1
+        <TEXT><html><body><p>Unrelated exhibit secret marker.</p></body></html>
+        </DOCUMENT>
+        """
+
+        segments = cleaner.clean_text_segments(submission)
+        financial_text = "\n".join(
+            segment.text
+            for segment in segments
+            if segment.section_name == "Financial Statements"
+        )
+
+        self.assertIn("Total revenues | 194,579 | 184,786", financial_text)
+        self.assertIn("Property and equipment, net | 11,349 | 10,292", financial_text)
+        self.assertNotIn("secret marker", "\n".join(segment.text for segment in segments))
+
+    def test_annual_report_exhibit_requires_explicit_incorporation(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        submission = """
+        <DOCUMENT>
+        <TYPE>10-K
+        <TEXT><html><body>
+          <p>ITEM 8. Financial Statements and Supplementary Data</p>
+          <p>The complete financial statements appear in this filing.</p>
+        </body></html>
+        </DOCUMENT>
+        <DOCUMENT>
+        <TYPE>ARS
+        <TEXT><html><body>
+          <h1>Financial Statements and Supplementary Data</h1>
+          <p>Consolidated Statements of Operations</p>
+          <p>Consolidated Balance Sheets</p>
+          <p>Attachment-only marker.</p>
+        </body></html>
+        </DOCUMENT>
+        """
+
+        segments = cleaner.clean_text_segments(submission)
+
+        self.assertNotIn("Attachment-only marker", "\n".join(s.text for s in segments))
+
     def test_clean_text_serializes_html_table_into_structured_lines(self) -> None:
         cleaner = HTMLCleaner(filing_type="10-K")
         html = """

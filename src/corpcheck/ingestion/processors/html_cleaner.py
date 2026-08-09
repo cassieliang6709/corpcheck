@@ -166,6 +166,9 @@ _HEADING_ALIAS_MAP_10K: dict[str, str] = {
     "management’s discussion and analysis of financial condition and results of operations": "MD&A",
     "management's discussion and analysis of financial condition and results of operations": "MD&A",
     "financial statements and supplementary data": "Financial Statements",
+    "consolidated statements of operations": "Financial Statements",
+    "consolidated balance sheets": "Financial Statements",
+    "notes to consolidated financial statements": "Financial Statements",
     "quantitative and qualitative disclosures about market risk": (
         "Quantitative and Qualitative Disclosures about Market Risk"
     ),
@@ -285,35 +288,74 @@ class HTMLCleaner:
             soup = BeautifulSoup(content, "html.parser")
         return soup
 
+    def _extract_submission_documents(
+        self,
+        content: str | bytes,
+    ) -> list[tuple[str | bytes, bool]]:
+        """Return the primary filing and a qualifying incorporated annual report.
+
+        The boolean marks an annual-report attachment. Attachments are considered
+        only for a 10-K that explicitly incorporates an annual report by reference;
+        unrelated exhibits remain excluded.
+        """
+        text = content.decode("utf-8", errors="ignore") if isinstance(content, bytes) else content
+        if "<DOCUMENT>" not in text.upper():
+            return [(content, False)]
+
+        target_type = self.filing_type.upper()
+        parsed: list[tuple[str, str]] = []
+        for block in re.findall(r"<DOCUMENT>(.*?)</DOCUMENT>", text, re.I | re.S):
+            type_match = re.search(r"<TYPE>\s*([^\n\r<]+)", block, re.I)
+            text_match = re.search(r"<TEXT>(.*)", block, re.I | re.S)
+            if type_match and text_match:
+                parsed.append(
+                    (type_match.group(1).strip().upper(), text_match.group(1).strip())
+                )
+
+        primary = next((body for doc_type, body in parsed if doc_type == target_type), None)
+        if primary is None:
+            return [(content, False)]
+
+        documents: list[tuple[str | bytes, bool]] = [(primary, False)]
+        if target_type != "10-K":
+            return documents
+
+        primary_words = " ".join(self._load_soup(primary).stripped_strings).lower()
+        incorporates_annual_report = (
+            "annual report" in primary_words
+            and re.search(r"incorporat(?:ed|ion).{0,120}by reference", primary_words)
+            is not None
+        )
+        if not incorporates_annual_report:
+            return documents
+
+        candidates: list[str] = []
+        for doc_type, body in parsed:
+            if doc_type != "ARS" and not doc_type.startswith("EX-13"):
+                continue
+            normalized = " ".join(self._load_soup(body).stripped_strings).lower()
+            financial_signals = sum(
+                signal in normalized
+                for signal in (
+                    "consolidated statements of operations",
+                    "consolidated balance sheets",
+                    "financial statements",
+                )
+            )
+            if financial_signals >= 2:
+                candidates.append(body)
+
+        if candidates:
+            documents.append((max(candidates, key=len), True))
+        return documents
+
     def _extract_primary_document(self, content: str | bytes) -> str | bytes:
         """
         When SEC filings are stored as ``full-submission.txt``, extract the main
         filing document (the 10-K / 10-Q body) instead of parsing the entire
         multi-document submission with exhibits attached.
         """
-        if isinstance(content, bytes):
-            text = content.decode("utf-8", errors="ignore")
-        else:
-            text = content
-
-        if "<DOCUMENT>" not in text.upper():
-            return content
-
-        target_type = self.filing_type.upper()
-        document_blocks = re.findall(r"<DOCUMENT>(.*?)</DOCUMENT>", text, re.I | re.S)
-        for block in document_blocks:
-            type_match = re.search(r"<TYPE>\s*([^\n\r<]+)", block, re.I)
-            if not type_match:
-                continue
-            doc_type = type_match.group(1).strip().upper()
-            if doc_type != target_type:
-                continue
-
-            text_match = re.search(r"<TEXT>(.*)", block, re.I | re.S)
-            if text_match:
-                return text_match.group(1).strip()
-
-        return content
+        return self._extract_submission_documents(content)[0][0]
 
     def _strip_xbrl(self, soup: BeautifulSoup) -> None:
         """
@@ -649,6 +691,8 @@ class HTMLCleaner:
             return False
         if re.match(r"^\d+$", heading):
             return False
+        if self._map_heading_fallback(heading) != heading.strip():
+            return True
 
         previous_nonempty = ""
         for idx in range(line_index - 1, -1, -1):
@@ -670,7 +714,11 @@ class HTMLCleaner:
             for idx in range(line_index + 1, min(len(lines), line_index + 5))
         )
 
-        if not (has_blank_before or previous_nonempty.startswith("[/TABLE]")):
+        if not (
+            line_index == 0
+            or has_blank_before
+            or previous_nonempty.startswith("[/TABLE]")
+        ):
             return False
         if not (has_blank_after or next_nonempty.startswith("[TABLE]")):
             return False
@@ -787,6 +835,29 @@ class HTMLCleaner:
     # Public API
     # ------------------------------------------------------------------
 
+    def _clean_content_segments(self, content: str | bytes) -> list[CleanerSegment]:
+        """Clean one already-selected filing document into retrieval segments."""
+        soup = self._load_soup(content)
+        self._strip_xbrl(soup)
+        self._strip_noise(soup)
+        self._replace_tables_with_structured_text(soup)
+
+        raw_text = self._extract_text(soup)
+        text = self._remove_cover_page(raw_text)
+        text = self._remove_signature_block(text)
+        text = self._remove_exhibit_index(text)
+        text = self._strip_boilerplate_phrases(text)
+        text = self._promote_item_heading_rows(text)
+
+        sections = self._filter_sections(self._split_sections(text))
+        if not sections and len(text.strip()) >= self.min_section_length:
+            sections = [("Full Document", text.strip())]
+
+        segments: list[CleanerSegment] = []
+        for section_name, section_text in sections:
+            segments.extend(self._section_to_segments(section_name, section_text))
+        return segments
+
     def clean_segments(self, file_path: str | Path) -> list[CleanerSegment]:
         """
         Load, clean, and section-split an SEC filing document.
@@ -812,42 +883,30 @@ class HTMLCleaner:
             logger.error("Cannot read %s: %s", path, exc)
             return []
 
-        content = self._extract_primary_document(content)
-
-        # Parse
-        soup = self._load_soup(content)
-
-        # Clean HTML
-        self._strip_xbrl(soup)
-        self._strip_noise(soup)
-        self._replace_tables_with_structured_text(soup)
-
-        # Extract text
-        raw_text = self._extract_text(soup)
-
-        # Remove boilerplate
-        text = self._remove_cover_page(raw_text)
-        text = self._remove_signature_block(text)
-        text = self._remove_exhibit_index(text)
-        text = self._strip_boilerplate_phrases(text)
-        text = self._promote_item_heading_rows(text)
-
-        # Split into sections
-        sections = self._split_sections(text)
-        sections = self._filter_sections(sections)
-        if not sections and len(text.strip()) >= self.min_section_length:
-            sections = [("Full Document", text.strip())]
-
         segments: list[CleanerSegment] = []
-        for section_name, section_text in sections:
-            segments.extend(self._section_to_segments(section_name, section_text))
+        documents = self._extract_submission_documents(content)
+        for document, is_annual_report in documents:
+            document_segments = self._clean_content_segments(document)
+            if is_annual_report:
+                document_segments = [
+                    segment
+                    for segment in document_segments
+                    if segment.section_name == "Financial Statements"
+                ]
+                if not document_segments:
+                    logger.warning(
+                        "Ignored incorporated annual report without recognised "
+                        "Financial Statements sections in %s",
+                        path,
+                    )
+            segments.extend(document_segments)
 
         logger.debug(
-            "Cleaned %s: %d sections, %d segments, %d total chars",
+            "Cleaned %s: %d documents, %d segments, %d total chars",
             path.name,
-            len(sections),
+            len(documents),
             len(segments),
-            sum(len(s[1]) for s in sections),
+            sum(len(segment.text) for segment in segments),
         )
         return segments
 
@@ -872,26 +931,16 @@ class HTMLCleaner:
         if filing_type:
             self.filing_type = filing_type.upper()
 
-        raw_html = self._extract_primary_document(raw_html)
-        soup = self._load_soup(raw_html)
-        self._strip_xbrl(soup)
-        self._strip_noise(soup)
-        self._replace_tables_with_structured_text(soup)
-
-        raw_text = self._extract_text(soup)
-        text = self._remove_cover_page(raw_text)
-        text = self._remove_signature_block(text)
-        text = self._remove_exhibit_index(text)
-        text = self._strip_boilerplate_phrases(text)
-        text = self._promote_item_heading_rows(text)
-
-        sections = self._filter_sections(self._split_sections(text))
-        if not sections and len(text.strip()) >= self.min_section_length:
-            sections = [("Full Document", text.strip())]
-
         segments: list[CleanerSegment] = []
-        for section_name, section_text in sections:
-            segments.extend(self._section_to_segments(section_name, section_text))
+        for document, is_annual_report in self._extract_submission_documents(raw_html):
+            document_segments = self._clean_content_segments(document)
+            if is_annual_report:
+                document_segments = [
+                    segment
+                    for segment in document_segments
+                    if segment.section_name == "Financial Statements"
+                ]
+            segments.extend(document_segments)
         return segments
 
     def clean_text(self, raw_html: str | bytes, filing_type: str | None = None) -> list[tuple[str, str]]:
