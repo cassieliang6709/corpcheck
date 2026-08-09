@@ -74,6 +74,16 @@ COMPANY_BOOST: float = _env_float("COMPANY_BOOST", 1.5)
 FILING_TYPE_BOOST: float = _env_float("FILING_TYPE_BOOST", 1.3)
 FISCAL_YEAR_BOOST: float = _env_float("FISCAL_YEAR_BOOST", 1.3)
 
+# When the question names a company, restrict the candidate pool to that issuer
+# instead of merely boosting it. A 1.5x boost is a preference, and across ~470k
+# chunks a strongly-worded question about a peer can still out-score the right
+# issuer; a question about AMD should never be answered from Intel's 10-K.
+# Applies only to a company the parser detected in the query text — an explicit
+# `company` argument is already a hard filter. Falls back to the unscoped pool
+# when the scoped search finds nothing, so a mis-detection degrades to the old
+# behaviour rather than to an empty answer.
+COMPANY_SCOPE_ENABLED: bool = _env_bool("COMPANY_SCOPE_ENABLED", True)
+
 # Drop chunks from filings that a later amendment has superseded (a 10-K/A
 # replaces the 10-K it amends). On by default: serving a figure the filer has
 # since restated is the most damaging error this system can make. Exposed as a

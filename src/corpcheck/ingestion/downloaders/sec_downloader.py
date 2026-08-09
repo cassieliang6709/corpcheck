@@ -25,6 +25,7 @@ from sec_edgar_downloader import Downloader
 from corpcheck.ingestion.config import (
     SEC_DOWNLOAD_DIR,
     SEC_MAX_REQUESTS_PER_SECOND,
+    SEC_TICKER_ALIASES,
     SEC_USER_AGENT,
 )
 
@@ -160,6 +161,33 @@ def _parse_yyyymmdd(raw: str | None) -> dt.date | None:
     return dt.datetime.strptime(raw, "%Y%m%d").date()
 
 
+def _parse_mmdd(raw: str | None) -> tuple[int, int] | None:
+    """Convert the SEC header's ``FISCAL YEAR END`` (``MMDD``) to (month, day)."""
+    if not raw or len(raw) != 4 or not raw.isdigit():
+        return None
+    month, day = int(raw[:2]), int(raw[2:])
+    if not 1 <= month <= 12 or not 1 <= day <= 31:
+        return None
+    return month, day
+
+
+def _turns_over_new_year(report_date: dt.date, fy_end: tuple[int, int] | None) -> bool:
+    """
+    Whether the fiscal year closes at the turn of the calendar year.
+
+    A 52/53-week calendar tracking 31 December drifts either side of New Year:
+    JNJ reports ``FISCAL YEAR END 0101`` and closed FY2022 on 2023-01-01. Such a
+    year is named after the calendar year it mostly covers, and its quarters need
+    no shift. Retail calendars closing at the end of January report ``0131``
+    (WMT, CRM) or even ``0201`` (TGT, TJX, whose 52/53-week year can end in early
+    February) and are named after the calendar year they close in -- treating
+    those the same way would move every label back a year.
+    """
+    if fy_end is not None:
+        return fy_end[0] == 12 or (fy_end[0] == 1 and fy_end[1] <= 14)
+    return report_date.day <= 14
+
+
 def _infer_fiscal_year(
     filing_type: str,
     report_date: dt.date | None,
@@ -171,18 +199,29 @@ def _infer_fiscal_year(
     if report_date is None:
         return 0
 
+    fy_end = _parse_mmdd(fiscal_year_end_mmdd)
+
     # Annual filings should align to the reported fiscal period, not the
     # subsequent filing year. This avoids mislabeling 52/53-week calendars
     # like AMD's FY2023 10-K (period-of-report 2023-12-30, filed 2024-01-31)
     # as FY2024.
     if filing_type == "10-K":
+        # Labelling JNJ's FY2022 (closed 2023-01-01) as 2023 collides with the
+        # real FY2023 10-K, and the upsert then drops one of them.
+        if report_date.month == 1 and _turns_over_new_year(report_date, fy_end):
+            return report_date.year - 1
         return report_date.year
 
-    if not fiscal_year_end_mmdd or len(fiscal_year_end_mmdd) != 4 or not fiscal_year_end_mmdd.isdigit():
+    if fy_end is None:
         return report_date.year
 
-    fy_end_month = int(fiscal_year_end_mmdd[:2])
-    fy_end_day = int(fiscal_year_end_mmdd[2:])
+    # A year that turns over New Year is named for the calendar year it spans,
+    # so its quarters keep that year. Only a genuinely offset year -- WMT closing
+    # 31 January -- rolls its later quarters into the next fiscal year.
+    if _turns_over_new_year(report_date, fy_end):
+        return report_date.year
+
+    fy_end_month, fy_end_day = fy_end
 
     if (report_date.month, report_date.day) > (fy_end_month, fy_end_day):
         return report_date.year + 1
@@ -204,18 +243,26 @@ def _infer_period(
     if filing_type != "10-Q" or report_date is None:
         return "unknown"
 
-    if not fiscal_year_end_mmdd or len(fiscal_year_end_mmdd) != 4 or not fiscal_year_end_mmdd.isdigit():
+    fy_end = _parse_mmdd(fiscal_year_end_mmdd)
+    if fy_end is None:
         return f"Q{((report_date.month - 1) // 3) + 1}"
 
-    fy_end_month = int(fiscal_year_end_mmdd[:2])
-    fy_end_day = int(fiscal_year_end_mmdd[2:])
-    fiscal_year = _infer_fiscal_year(filing_type, report_date, fiscal_year_end_mmdd)
+    fy_end_month, fy_end_day = fy_end
 
-    try:
-        prior_fy_end = dt.date(fiscal_year - 1, fy_end_month, fy_end_day)
-    except ValueError:
-        # Fallback for unusual fiscal-year-end dates like Feb 29 in non-leap years.
-        prior_fy_end = dt.date(fiscal_year - 1, fy_end_month, min(fy_end_day, 28))
+    # Anchor on the fiscal year end that actually precedes this report rather than
+    # deriving one from the fiscal-year label: for a company whose year turns over
+    # New Year the year ends in January *after* the year it is named for, and
+    # `fiscal_year - 1` lands a full year early.
+    def _fy_end_in(year: int) -> dt.date:
+        try:
+            return dt.date(year, fy_end_month, fy_end_day)
+        except ValueError:
+            # Fallback for unusual fiscal-year-end dates like Feb 29 in non-leap years.
+            return dt.date(year, fy_end_month, min(fy_end_day, 28))
+
+    prior_fy_end = _fy_end_in(report_date.year)
+    if prior_fy_end >= report_date:
+        prior_fy_end = _fy_end_in(report_date.year - 1)
 
     delta_days = (report_date - prior_fy_end).days
     quarter_num = max(1, min(4, int(round(delta_days / 91.0))))
@@ -354,6 +401,9 @@ class SECDownloader:
         year_set = set(years)
 
         for ticker in tickers:
+            # Directories named after a CIK belong to an issuer whose ticker the
+            # downloader could not resolve; store them under the real ticker.
+            resolved_ticker = SEC_TICKER_ALIASES.get(ticker, ticker)
             for filing_type in filing_types:
                 root = _filing_root(self.download_dir, ticker, filing_type)
                 for doc_path, accession in _iter_filing_paths(root):
@@ -376,7 +426,7 @@ class SECDownloader:
                     source_url = _build_source_url(cik, accession) if cik else ""
                     results.append(
                         (
-                            ticker,
+                            resolved_ticker,
                             filing_type,
                             fiscal_year,
                             period,

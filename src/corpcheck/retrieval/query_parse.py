@@ -41,6 +41,17 @@ _DOMAIN_COMPANY_TOKENS = {"com", "net", "org"}
 
 _TICKER_RE = re.compile(r"\b([A-Z]{2,5})\b")
 
+# Camel-cased ticker shorthand: "JnJ", "GoogL". Requires at least two capitals so
+# a sentence-initial ordinary word ("Are", "Cost") cannot masquerade as a ticker;
+# a lowercase-only token is never considered.
+_MIXED_CASE_TICKER_RE = re.compile(r"\b([A-Za-z]{2,5})\b")
+
+# A first word this long is distinctive enough to stand in for the whole company
+# name ("Costco" for Costco Wholesale Corporation). Shorter ones -- "CVS", "3M" --
+# are already covered by the ticker path, and admitting them here would let
+# common words collide with issuers.
+_MIN_HEAD_ALIAS_LEN = 5
+
 # Years are matched with digit lookarounds rather than \b. "FY2019" has no word
 # boundary between "Y" and "2" — both are word characters — so \b(20\d{2})\b
 # silently misses the notation analysts actually use. The lookarounds still
@@ -120,6 +131,12 @@ def _generate_company_aliases(company_name: str) -> set[str]:
     if len(trimmed_tokens) >= 2 and trimmed_tokens[1] in _DOMAIN_COMPANY_TOKENS:
         add_alias([trimmed_tokens[0]])
 
+    # People say "Costco", not "Costco Wholesale Corporation". Register the head
+    # word on its own when it is long enough to be a name rather than a common
+    # word; `load_known_tickers` then discards it if two issuers claim it.
+    if len(trimmed_tokens) >= 2 and len(trimmed_tokens[0]) >= _MIN_HEAD_ALIAS_LEN:
+        add_alias([trimmed_tokens[0]])
+
     return aliases
 
 
@@ -193,6 +210,14 @@ def detect_company_in_query(query: str) -> Optional[str]:
     for match in _TICKER_RE.finditer(query):
         if match.group(1) in _known_tickers:
             return match.group(1)
+
+    # Then camel-cased shorthand. "JnJ" is how people write JNJ, and requiring two
+    # capitals keeps ordinary capitalised words out: "Are JnJ's FY2022 ..." yields
+    # JNJ and not ARE.
+    for match in _MIXED_CASE_TICKER_RE.finditer(query):
+        token = match.group(1)
+        if sum(ch.isupper() for ch in token) >= 2 and token.upper() in _known_tickers:
+            return token.upper()
 
     normalized_query = _normalize_company_text(query)
     aliases = sorted(_company_alias_to_ticker.items(), key=lambda item: len(item[0]), reverse=True)

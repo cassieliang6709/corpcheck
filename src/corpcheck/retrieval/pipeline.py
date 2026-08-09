@@ -36,7 +36,12 @@ from corpcheck.retrieval.search import (
     embed_query,
     vector_search,
 )
-from corpcheck.settings import FUSION_STRATEGY, REVISION_FILTER_ENABLED, RRF_K
+from corpcheck.settings import (
+    COMPANY_SCOPE_ENABLED,
+    FUSION_STRATEGY,
+    REVISION_FILTER_ENABLED,
+    RRF_K,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,38 +69,49 @@ async def retrieve(
     explicit_filing_type = None if filing_type else detect_filing_type_in_query(query)
     hinted_filing_type = None if filing_type else detect_filing_type_hint_in_query(query)
     effective_filing_type = filing_type or explicit_filing_type
-    filter_where, filter_params = build_filter_clause(
-        sector, resolved_company, effective_filing_type, fiscal_year
-    )
-
     # Detect signals before retrieval so boosts are embedded in SQL ORDER BY,
     # affecting which chunks the DB returns rather than just reordering them after.
     boost_ticker = detected_company
     boost_filing_type = None if effective_filing_type else hinted_filing_type
     boost_years = detect_years_in_query(query)
 
-    vec_rows, bm25_rows = await asyncio.gather(
-        vector_search(
-            pool,
-            query_vec,
-            overfetch,
-            filter_where,
-            filter_params,
-            boost_ticker,
-            boost_filing_type,
-            boost_years,
-        ),
-        bm25_search(
-            pool,
-            bm25_query,
-            overfetch,
-            filter_where,
-            filter_params,
-            boost_ticker,
-            boost_filing_type,
-            boost_years,
-        ),
-    )
+    # Scoping to the detected issuer is a filter, not a preference; see
+    # COMPANY_SCOPE_ENABLED. The unscoped pool is still reachable as a fallback.
+    scope_company = detected_company if COMPANY_SCOPE_ENABLED else None
+
+    async def _candidates(company_filter: Optional[str]):
+        filter_where, filter_params = build_filter_clause(
+            sector, resolved_company or company_filter, effective_filing_type, fiscal_year
+        )
+        return await asyncio.gather(
+            vector_search(
+                pool,
+                query_vec,
+                overfetch,
+                filter_where,
+                filter_params,
+                boost_ticker,
+                boost_filing_type,
+                boost_years,
+            ),
+            bm25_search(
+                pool,
+                bm25_query,
+                overfetch,
+                filter_where,
+                filter_params,
+                boost_ticker,
+                boost_filing_type,
+                boost_years,
+            ),
+        )
+
+    vec_rows, bm25_rows = await _candidates(scope_company)
+    if scope_company and not vec_rows and not bm25_rows:
+        # The detection was wrong, or the issuer has no chunks. Degrade to the
+        # whole corpus rather than returning nothing.
+        logger.info("Company scope %s yielded no candidates; retrying unscoped", scope_company)
+        vec_rows, bm25_rows = await _candidates(None)
 
     # Supersession is resolved here — after candidate generation, before fusion.
     # Filtering the candidate pool (rather than the final top-k) lets surviving

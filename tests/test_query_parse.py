@@ -11,11 +11,32 @@ from __future__ import annotations
 
 import pytest
 
+from corpcheck.retrieval import query_parse
 from corpcheck.retrieval.query_parse import (
+    _generate_company_aliases,
+    detect_company_in_query,
     detect_filing_type_hint_in_query,
     detect_year_in_query,
     detect_years_in_query,
 )
+
+
+@pytest.fixture
+def company_caches(monkeypatch):
+    """Install a small in-memory ticker/alias cache in place of the database one."""
+    names = {
+        "COST": "Costco Wholesale Corporation",
+        "JNJ": "Johnson & Johnson",
+        "ARE": "Alexandria Real Estate Equities Inc",
+        "MS": "Morgan Stanley",
+    }
+    alias_to_ticker: dict[str, str] = {}
+    for ticker, name in names.items():
+        for alias in _generate_company_aliases(name):
+            alias_to_ticker.setdefault(alias, ticker)
+    monkeypatch.setattr(query_parse, "_known_tickers", set(names))
+    monkeypatch.setattr(query_parse, "_company_alias_to_ticker", alias_to_ticker)
+    return alias_to_ticker
 
 
 @pytest.mark.parametrize(
@@ -86,6 +107,37 @@ def test_detect_years_deduplicates_and_sorts():
 def test_detect_year_in_query_returns_the_earliest():
     assert detect_year_in_query("compare FY2018 with FY2020") == "2018"
     assert detect_year_in_query("no year here") is None
+
+
+def test_camel_cased_ticker_shorthand_resolves(company_caches):
+    # "JnJ" is how the question is actually phrased; the all-caps scan misses it.
+    assert detect_company_in_query("Are JnJ's FY2022 financials strong?") == "JNJ"
+
+
+def test_capitalised_english_words_are_not_read_as_tickers(company_caches):
+    # ARE is a real ticker (Alexandria Real Estate). A sentence starting with
+    # "Are" must not resolve to it: one capital is not shorthand.
+    assert detect_company_in_query("Are gross margins consistent year to year?") is None
+    assert detect_company_in_query("Ms. Smith asked about revenue") is None
+
+
+def test_head_word_of_a_multiword_company_name_is_an_alias(company_caches):
+    assert detect_company_in_query("How much total assets did Costco have in FY2021?") == "COST"
+
+
+def test_short_head_words_do_not_become_aliases():
+    # "Cost" would swallow "cost of revenue"; only heads of >=5 chars qualify.
+    aliases = _generate_company_aliases("Cost Plus Inc")
+    assert "cost" not in aliases
+
+
+def test_ambiguous_head_words_are_dropped_by_the_cache(monkeypatch):
+    # Two issuers whose names start with the same word must not resolve either way.
+    monkeypatch.setattr(query_parse, "_known_tickers", {"AAA", "BBB"})
+    monkeypatch.setattr(query_parse, "_company_alias_to_ticker", {})
+    assert "general" in _generate_company_aliases("General Motors Company")
+    assert "general" in _generate_company_aliases("General Electric Company")
+    assert detect_company_in_query("What did General earn?") is None
 
 
 def test_two_digit_fiscal_year_signals_an_annual_filing():

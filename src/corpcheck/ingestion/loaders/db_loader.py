@@ -187,6 +187,56 @@ class DBLoader:
     # 2. filings
     # ------------------------------------------------------------------
 
+    def _warn_on_accession_conflicts(self, rows: Sequence[Row]) -> None:
+        """
+        Log a warning when two distinct filings collide on the ``filings``
+        unique key.
+
+        ``load_filing`` upserts on (ticker, filing_type, fiscal_year, period),
+        so a mislabelled fiscal year replaces an unrelated accession instead of
+        adding a row. Left unreported that loses a filing silently, which is how
+        JNJ's FY2022 10-K disappeared behind FY2023.
+        """
+        batch: dict[tuple, str] = {}
+        for row in rows:
+            key = (row["ticker"], row["filing_type"], row["fiscal_year"], row["period"])
+            accession = (row.get("accession_number") or "").strip()
+            previous = batch.get(key)
+            if previous and accession and previous != accession:
+                logger.warning(
+                    "Filings %s collide within this batch: accession %s replaces %s",
+                    key,
+                    accession,
+                    previous,
+                )
+            batch[key] = accession or previous or ""
+
+        if not batch:
+            return
+
+        with self.conn.cursor() as cur:
+            for key, accession in batch.items():
+                if not accession:
+                    continue
+                cur.execute(
+                    """
+                    SELECT accession_number FROM filings
+                    WHERE ticker = %s AND filing_type = %s
+                      AND fiscal_year = %s AND period = %s
+                    """,
+                    key,
+                )
+                result = cur.fetchone()
+                stored = (result[0] or "").strip() if result else ""
+                if stored and stored != accession:
+                    logger.warning(
+                        "Filing %s already holds accession %s; incoming %s will "
+                        "overwrite it - check fiscal-year inference",
+                        key,
+                        stored,
+                        accession,
+                    )
+
     def load_filing(self, rows: Sequence[Row]) -> dict[tuple, int]:
         """
         Upsert rows into ``filings`` and return a mapping of
@@ -219,6 +269,7 @@ class DBLoader:
             r.setdefault("accession_number", "")
             r.setdefault("cik", "")
             normalised_rows.append(r)
+        self._warn_on_accession_conflicts(normalised_rows)
         self._execute_batch(sql, normalised_rows)
 
         # Fetch back the IDs

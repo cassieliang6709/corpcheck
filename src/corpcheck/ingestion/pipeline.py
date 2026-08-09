@@ -180,14 +180,7 @@ def _process_filings(
             period_of_report = None
             accession_number = ""
             cik = ""
-            if len(filing_meta) == 5:
-                ticker, filing_type, fiscal_year, local_path, source_url = filing_meta
-                period = _infer_period(filing_type, fiscal_year)
-                filed_date = None
-            elif len(filing_meta) == 6:
-                ticker, filing_type, fiscal_year, local_path, source_url, filed_date = filing_meta
-                period = _infer_period(filing_type, fiscal_year)
-            elif len(filing_meta) >= 10:
+            if len(filing_meta) >= 10:
                 (
                     ticker,
                     filing_type,
@@ -448,17 +441,6 @@ def _process_transcripts(
 
     logger.info("Transcript processing complete: %d chunks", total_chunks)
     return total_chunks
-
-
-def _infer_period(filing_type: str, fiscal_year: int) -> str:
-    """Return a sensible period label given filing type."""
-    if filing_type == "10-K":
-        return "annual"
-    elif filing_type == "10-Q":
-        return "quarterly"
-    elif filing_type == "8-K":
-        return "event"
-    return "unknown"
 
 
 def _print_stats(loader: DBLoader, elapsed: float) -> None:

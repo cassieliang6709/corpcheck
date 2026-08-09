@@ -170,6 +170,15 @@ SEC_USER_AGENT: str = os.getenv(
 )
 SEC_DOWNLOAD_DIR: str = os.getenv("SEC_DOWNLOAD_DIR", "./data/sec_filings")
 
+# sec-edgar-downloader names a filing directory after the CIK when it cannot
+# resolve a ticker, which happens for delisted issuers: Pioneer Natural
+# Resources was acquired by Exxon in 2024, so its filings landed under
+# 0001038357. Map those directories back to the ticker the rest of the pipeline
+# (and the companies table) uses.
+SEC_TICKER_ALIASES: dict[str, str] = {
+    "0001038357": "PXD",
+}
+
 REQUEST_TIMEOUT: int = 30          # seconds
 REQUEST_DELAY_SECONDS: float = 1.0  # polite delay between web requests
 

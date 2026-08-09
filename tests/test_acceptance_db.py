@@ -1,10 +1,13 @@
 import os
+import socket
+import ssl
 import unittest
+from functools import lru_cache
 from pathlib import Path
 
 import psycopg2
 
-from corpcheck.ingestion.config import SEC_DOWNLOAD_DIR
+from corpcheck.ingestion.config import SEC_DOWNLOAD_DIR, SEC_TICKER_ALIASES
 from corpcheck.ingestion.downloaders.sec_downloader import SECDownloader
 
 
@@ -13,9 +16,30 @@ TEST_DATABASE_URL = os.getenv(
     os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/financial_rag"),
 )
 
-SEC_TICKER_ALIASES = {
-    "0001038357": "PXD",
-}
+SEC_PROBE_HOST = "www.sec.gov"
+
+LOCAL_SEC_ROOT = Path(SEC_DOWNLOAD_DIR) / "sec-edgar-filings"
+
+
+@lru_cache(maxsize=1)
+def _sec_is_reachable() -> bool:
+    """
+    Whether EDGAR can be reached from this machine.
+
+    Constructing ``SECDownloader`` fetches EDGAR's ticker-to-CIK map, so the disk
+    coverage test cannot run offline. Complete a TLS handshake rather than just
+    opening the socket: a VPN using fake-IP DNS accepts the connection locally and
+    only fails during the handshake, and US .gov sites refuse hosting-provider
+    exit IPs outright, so a port check would report a working connection that then
+    dies mid-test.
+    """
+    try:
+        with socket.create_connection((SEC_PROBE_HOST, 443), timeout=5) as sock:
+            context = ssl.create_default_context()
+            with context.wrap_socket(sock, server_hostname=SEC_PROBE_HOST):
+                return True
+    except OSError:
+        return False
 
 
 class DatabaseAcceptanceTests(unittest.TestCase):
@@ -188,13 +212,28 @@ class DatabaseAcceptanceTests(unittest.TestCase):
         self.assertEqual(filings_with_tables, filing_count)
         self.assertEqual(filings_with_narrative, filing_count)
 
+    @unittest.skipUnless(
+        LOCAL_SEC_ROOT.is_dir(),
+        f"{LOCAL_SEC_ROOT} absent; the raw EDGAR download tree is a local cache that is "
+        "not checked in, so there is nothing on disk to compare the database against",
+    )
+    @unittest.skipUnless(
+        _sec_is_reachable(), f"{SEC_PROBE_HOST} unreachable; EDGAR ticker map cannot be fetched"
+    )
     def test_local_sec_disk_coverage_is_complete(self) -> None:
-        local_root = Path(SEC_DOWNLOAD_DIR) / "sec-edgar-filings"
-        local_dirs = sorted(path.name for path in local_root.iterdir() if path.is_dir())
-        years = list(range(2018, 2026))
+        local_dirs = sorted(path.name for path in LOCAL_SEC_ROOT.iterdir() if path.is_dir())
+
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT min(fiscal_year), max(fiscal_year) FROM filings")
+            first_year, last_year = cur.fetchone()
+        # Track whatever the corpus actually spans; a hard-coded window silently
+        # drops filings once the range grows.
+        years = list(range(first_year, last_year + 1))
+
+        # _collect_metadata already resolves CIK-named directories to a ticker.
         local_metas = SECDownloader()._collect_metadata(local_dirs, ["10-K", "10-Q"], years)
         local_keys = {
-            (SEC_TICKER_ALIASES.get(ticker, ticker), filing_type, fiscal_year, period)
+            (ticker, filing_type, fiscal_year, period)
             for ticker, filing_type, fiscal_year, period, *_ in local_metas
         }
         local_tickers = sorted({SEC_TICKER_ALIASES.get(ticker, ticker) for ticker in local_dirs})
@@ -210,9 +249,12 @@ class DatabaseAcceptanceTests(unittest.TestCase):
             )
             db_keys = set(cur.fetchall())
 
+        # The filings tree is a cache, not the source of truth. It was cleared to
+        # reclaim ~31 GB and only the filings missing from the database were
+        # re-fetched, so the database legitimately holds more than what is on
+        # disk. What must still hold is that nothing on disk went uningested.
         self.assertGreater(len(local_keys), 0)
         self.assertEqual(local_keys - db_keys, set())
-        self.assertEqual(db_keys - local_keys, set())
 
     def test_sec_filings_have_complete_metadata(self) -> None:
         missing_meta_count = self.fetchone(
@@ -232,13 +274,24 @@ class DatabaseAcceptanceTests(unittest.TestCase):
         self.assertEqual(missing_meta_count, 0)
 
     def test_sec_fiscal_year_and_period_are_consistent(self) -> None:
+        # A 52/53-week calendar tracking 31 December can close a few days into
+        # January (JNJ's FY2022 closed 2023-01-01), so the fiscal year is the
+        # prior calendar year there. Companies that close in late January (WMT,
+        # NVDA, CRM) name the year after its closing date. Asserting a plain
+        # EXTRACT(YEAR) match would re-encode the bug that collapsed JNJ's
+        # FY2022 10-K into FY2023.
         bad_10k_fiscal_years = self.fetchone(
             """
             SELECT COUNT(*)
             FROM filings
             WHERE filing_type = '10-K'
               AND period_of_report IS NOT NULL
-              AND EXTRACT(YEAR FROM period_of_report) <> fiscal_year
+              AND fiscal_year <> CASE
+                    WHEN EXTRACT(MONTH FROM period_of_report) = 1
+                         AND EXTRACT(DAY FROM period_of_report) < 15
+                    THEN EXTRACT(YEAR FROM period_of_report) - 1
+                    ELSE EXTRACT(YEAR FROM period_of_report)
+                  END
             """
         )[0]
         bad_10q_periods = self.fetchone(
