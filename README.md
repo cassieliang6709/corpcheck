@@ -394,24 +394,40 @@ tuning.
    fell from 4 to 3, but those secondary gains do not override the strict gate.
 3. **Move the next retrieval experiment to representation and reranking.** The
    remaining reachable misses are dominated by large tables whose generic
-   titles and distant headers weaken both sparse and dense ranking. Any next arm
-   needs a train/held-out split from a larger FinanceBench slice before tuning;
-   the current 35 questions are now development data, not proof of generalisation.
-4. **Repair corpus coverage separately.** The CVS FY2018 turnover evidence is
+   titles and distant headers weaken both sparse and dense ranking. Inspection
+   of current gold parents confirmed the representation failure: relevant Amazon
+   and Nike statement tables are stored as `Table 119` and `Table 117`, with
+   `header_text = null`, even though their opening rows contain the reporting
+   period and years. The next arm will first recover semantic table titles and
+   `<td>`-encoded header/year rows, re-ingest a small isolated filing set, and
+   measure whether the gold parents enter the candidate pool. Only if they enter
+   the pool but still miss top 10 will a generic reranker be added.
+4. **Create a real held-out contract before tuning that arm.** The current 35
+   questions have informed multiple designs and are development data, not proof
+   of generalisation. An audit of the official 150-record open-source
+   FinanceBench file found 115 records outside this slice, but only two point to
+   a supported filing already present in this corpus (`AMAZON_2017_10K`). Two
+   questions from one issuer are not a credible held-out benchmark. The corpus
+   therefore needs new issuers and filing years, followed by a predeclared split
+   and gates, before representation or reranking gains can support a production
+   claim. Benchmark PDFs may be used for parser diagnosis, but not as a substitute
+   for validating the production SEC ingestion path.
+5. **Repair corpus coverage separately.** The CVS FY2018 turnover evidence is
    absent from the indexed FY2018 filing chunks, so query/ranking changes cannot
    recover it. The cleaner now has a fail-closed path for a 10-K that explicitly
    incorporates an `ARS`/`EX-13*` annual report: it retains only recognised
    Financial Statements segments and ignores unrelated exhibits. Synthetic
    regression coverage includes the three missing CVS values; the exact
    accession still needs isolated redownload, re-ingestion, and chunk verification.
-5. **Complete live amendment validation.** The isolated GameStop 2024
+6. **Complete live amendment validation.** The isolated GameStop 2024
    10-K/10-K/A validator is implemented and fail-closed. Running it requires a
    real two-token SEC contact user-agent (`CorpCheck email@example.com`); it
    preflights an empty target before schema creation and will never write to the
    benchmark database.
-6. **Rerun answer generation only after retrieval improves.** Reuse the curated
-   34-record gold and compare against the 1/34 baseline. Build a small demo only
-   after the answer and citation evidence is credible.
+7. **Rerun answer generation only after retrieval clears its gates.** Reuse the
+   curated 34-record gold and compare against the 1/34 baseline only after strict
+   Recall@10 improves on development data without a held-out regression. Build a
+   small demo only after answer correctness and citation support are credible.
 
 ## Background and attribution
 
