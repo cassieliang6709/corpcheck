@@ -311,6 +311,23 @@ that six of seven answerable questions lacked the gold evidence in the retrieved
 chunks, so this run primarily confirms that retrieval remains the bottleneck; it
 is not a claim about larger hosted models.
 
+The answer-evaluation set has since been expanded to 34 manually curated
+FinanceBench records. One additional source record is excluded explicitly: its
+published answer is `77.78`, while its own evidence says approximately $700
+million total cost with 90% already incurred, implying about $70 million
+remaining. On the 34 usable records, the same local 7B/8K setup produced this
+pre-improvement baseline:
+
+- answerability decisions: 33/34 correct;
+- final-answer correctness: 1/34;
+- present and in-range citation indices: 22/34;
+- combined end-to-end pass: 1/34.
+
+These numbers are intentionally reported before retrieval repair. Valid citation
+indices do not establish that a citation supports the claim, and the 34 outputs
+are still undergoing manual failure classification. The local artifacts live in
+`evaluation/runs/R7_answer_financebench34/` and are gitignored.
+
 Failure analysis of the current strict misses found that 19 of 30 reachable
 misses are table-retrieval failures. A subsequent isolated experiment built
 130,084 searchable row children from 29,570 benchmark-scoped table parents while
@@ -320,6 +337,11 @@ p95 latency from 461 ms to 2,374 ms. The arm therefore remains disabled by
 default. Its parser, resumable indexer, feature flag, and full stop/continue
 decision are retained for reproducibility; see
 `evaluation/NEXT_RETRIEVAL_EXPERIMENT.md`.
+
+A second experiment hard-filtered candidates to a query-derived company,
+single fiscal year, and filing type. It was also rejected: strict Recall@10 did
+not move from 0.1429, while warm p95 latency increased from 280 ms to 1,198 ms.
+The rejected branch is not retained in production code.
 
 **How a hit is defined.** FinanceBench gives a gold evidence *span* — a page or
 table lifted from the filing — not a chunk id. Our chunk boundaries differ, so
@@ -352,6 +374,29 @@ This computes the best overlap achievable by any chunk of the correct filing —
 perfect oracle retrieval — and reports the resulting ceiling per threshold. Run
 it whenever the corpus or the chunking strategy changes. Any `ir_eval` result
 above the ceiling indicates a scoring bug.
+
+## Current plan
+
+The next work is evidence coverage, not a larger language model or more prompt
+tuning.
+
+1. **Test a filing-local disjunctive sparse arm.** Resolve the filing from
+   query-derived issuer/period/form metadata, then search a small set of
+   transparent metric clauses with OR semantics inside that filing. The current
+   `plainto_tsquery` path effectively requires every surviving natural-language
+   term and returns no sparse candidates for several financial questions.
+2. **Require a measurable retrieval win.** The new arm must improve strict
+   Recall@10 and recover missing gold evidence without a material p95 regression.
+   It stays evaluation-only until it clears those gates.
+3. **Repair corpus coverage separately.** The CVS FY2018 turnover evidence is
+   absent from the indexed FY2018 filing chunks, so query/ranking changes cannot
+   recover it. That filing needs isolated re-ingestion and chunk verification.
+4. **Complete live amendment validation.** The isolated GameStop 2024
+   10-K/10-K/A validator is implemented and fail-closed. Running it requires a
+   real SEC contact user-agent; it will never write to the benchmark database.
+5. **Rerun answer generation only after retrieval improves.** Reuse the curated
+   34-record gold and compare against the 1/34 baseline. Build a small demo only
+   after the answer and citation evidence is credible.
 
 ## Background and attribution
 
