@@ -413,6 +413,37 @@ tuning.
    timings:
 
    ```bash
+   .venv/bin/python -m evaluation.snapshot_sec_corpus_manifest \
+     --database-url "$CORPCHECK_OLD_DATABASE_URL" \
+     --output evaluation/runs/R11_table_representation/sec_corpus_manifest.json
+   ```
+
+   The current read-only snapshot locks 1,662 unique accessions across 50
+   tickers, with 469,874/469,874 chunks embedded, at payload SHA-256
+   `b5c1faf898eecb2e8c35b21fe724a5f7a8505922f15db1241caba5e2e60f2675`.
+   It records deterministic SEC raw-submission URLs without database
+   credentials and refuses to overwrite a different manifest. A local cache
+   audit found only 141/1,662 raw submissions remain, so the other 1,521 must be
+   recovered before a full cleaner rebuild can be considered matched.
+
+   Recovery is manifest-driven, resumable, and isolated from the production
+   cache. It validates the manifest signature and each submission's SEC header,
+   writes through an atomic `.part` file, and emits a write-once report locking
+   every raw file's SHA-256 and size:
+
+   ```bash
+   .venv/bin/python -m evaluation.recover_sec_submissions \
+     --manifest evaluation/runs/R11_table_representation/sec_corpus_manifest.json \
+     --download-dir "$CORPCHECK_SEC_RECOVERY_DIR" \
+     --report evaluation/runs/R11_table_representation/sec_recovery_report.json
+   ```
+
+   Use a real contact address locally; never commit it. Existing files are
+   resumed only after their accession, CIK, form, filing date, and period of
+   report match the frozen manifest. Invalid collisions and partial recovery
+   leave the final report unwritten.
+
+   ```bash
    .venv/bin/python -m evaluation.paired_retrieval_gate \
      --gate-profile development \
      --old-db-url "$CORPCHECK_OLD_DATABASE_URL" \
@@ -422,11 +453,19 @@ tuning.
    ```
 
    The runner requires different databases with identical company and filing
-   identities, alternates old/new query order, and measures three rounds after
-   one untimed warm-up round. It fails closed unless every development round
+   identities on the same PostgreSQL server, binds each gate profile to the
+   frozen dataset hash and row count, requires complete embeddings and oracle
+   coverage, alternates old/new query order, and measures three rounds after one
+   untimed warm-up round. It exits nonzero unless every development round
    reaches strict Recall@10 >= 0.2500 without regressing against the old corpus.
    It also checks strict oracle reachability, zero-provenance queries, and paired
    p95 latency.
+
+   An identical-clone control now verifies the protocol against the current
+   corpus: both sides produced strict Recall@10 = 0.1429 in all three measured
+   rounds, with 35/44 strict-reachable oracle spans and no p95 regression. The
+   control was correctly rejected on the 0.2500 development floor; it is a
+   runner validation, not an experiment result.
 4. **Create a real held-out contract before tuning that arm.** The current 35
    questions have informed multiple designs and are development data, not proof
    of generalisation. An audit of the official 150-record open-source
@@ -437,8 +476,11 @@ tuning.
    reranking gains can support a production claim. The metadata-only held-out
    rule is now frozen at 80 questions across 45 10-K documents and 21 issuers;
    see `evaluation/FINANCEBENCH_SPLIT.md` for the source lock and acceptance
-   gates. Benchmark PDFs may be used for parser diagnosis, but not as a
-   substitute for validating the production SEC ingestion path.
+   gates. Its current document list defines gold provenance, but is not yet an
+   exact download manifest: CIK, accession, SEC dates, selected raw component,
+   and file SHA-256 still need to be locked before ingestion. Benchmark PDFs may
+   be used for parser diagnosis, but not as a substitute for validating the
+   production SEC ingestion path.
 5. **Repair corpus coverage separately.** The CVS FY2018 turnover evidence is
    absent from the indexed FY2018 filing chunks, so query/ranking changes cannot
    recover it. The cleaner now has a fail-closed path for a 10-K that explicitly
@@ -456,12 +498,14 @@ tuning.
    Recall@10 improves on development data without a held-out regression. Build a
    small demo only after answer correctness and citation support are credible.
 
-In execution order, the remaining path is: validate the AMZN/Nike representation
-in an isolated database; build matched old/new development corpora and run the
-paired development gate; ingest the frozen 45-document held-out corpus into the
-same two representations and evaluate it exactly once; validate CVS and
-GameStop in isolation; then rerun the 34-answer benchmark. Any failed gate stops
-that retrieval arm instead of triggering more held-out-specific tuning.
+In execution order, the remaining path is: download and lock the missing raw SEC
+submissions; validate the AMZN/Nike representation in an isolated database;
+rebuild the full 1,662-filing development corpus with the new cleaner rather
+than changing only benchmark-gold filings; run the paired development gate;
+enrich and ingest the frozen 45-document held-out corpus into matched old/new
+representations and evaluate it exactly once; validate CVS and GameStop in
+isolation; then rerun the 34-answer benchmark. Any failed gate stops that
+retrieval arm instead of triggering more held-out-specific tuning.
 
 ## Background and attribution
 

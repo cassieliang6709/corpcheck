@@ -39,6 +39,16 @@ from evaluation.oracle import _fetch_filing_chunks
 
 K = 10
 STRICT_THRESHOLD = 0.5
+DATASET_CONTRACTS = {
+    "development": {
+        "sha256": "1fdce65e8fe0ae03f5dcee732b8e70d9a22969d95981359c9505e105a9ca0f5f",
+        "queries": 35,
+    },
+    "heldout": {
+        "sha256": "f2d8ba8b3f1717166c862cc320c8c7a7678d19a4f3dd9c9438f1a74519ad5eae",
+        "queries": 80,
+    },
+}
 
 
 class GateError(RuntimeError):
@@ -50,6 +60,7 @@ class CorpusSnapshot:
     companies: frozenset[tuple[str, str]]
     filings: frozenset[tuple[Any, ...]]
     chunk_count: int
+    embedded_chunk_count: int
 
 
 def _canonical_database_target(database_url: str) -> tuple[str, str, int, str]:
@@ -90,6 +101,31 @@ async def runtime_database_identity(pool: Any) -> tuple[str, str, int]:
     return (str(row["database"]), str(row["address"]), int(row["port"] or 0))
 
 
+async def retrieval_environment_fingerprint(pool: Any) -> str:
+    rows = await pool.fetch(
+        """
+        SELECT 'index' AS kind,
+               schemaname || '.' || indexname AS name,
+               indexdef AS definition
+        FROM pg_indexes
+        WHERE schemaname = current_schema()
+          AND tablename IN ('companies', 'filings', 'chunks')
+        UNION ALL
+        SELECT 'view' AS kind,
+               current_schema() || '.v_retrieval_chunks' AS name,
+               pg_get_viewdef('v_retrieval_chunks'::regclass, true) AS definition
+        ORDER BY kind, name
+        """
+    )
+    payload = [
+        [str(row["kind"]), str(row["name"]), str(row["definition"])] for row in rows
+    ]
+    if not payload:
+        raise GateError("retrieval schema fingerprint is empty")
+    encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 async def corpus_snapshot(pool: Any) -> CorpusSnapshot:
     company_rows = await pool.fetch("SELECT ticker, name FROM companies")
     filing_rows = await pool.fetch(
@@ -100,6 +136,9 @@ async def corpus_snapshot(pool: Any) -> CorpusSnapshot:
         """
     )
     chunk_count = await pool.fetchval("SELECT COUNT(*) FROM chunks")
+    embedded_chunk_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL"
+    )
     companies = frozenset((str(row["ticker"]), str(row["name"])) for row in company_rows)
     filings = frozenset(
         (
@@ -115,7 +154,12 @@ async def corpus_snapshot(pool: Any) -> CorpusSnapshot:
         )
         for row in filing_rows
     )
-    return CorpusSnapshot(companies, filings, int(chunk_count))
+    return CorpusSnapshot(
+        companies,
+        filings,
+        int(chunk_count),
+        int(embedded_chunk_count),
+    )
 
 
 def assert_identity_sets_match(old: CorpusSnapshot, new: CorpusSnapshot) -> None:
@@ -131,6 +175,32 @@ def assert_identity_sets_match(old: CorpusSnapshot, new: CorpusSnapshot) -> None
             f"(old_only={len(old.filings - new.filings)}, "
             f"new_only={len(new.filings - old.filings)})"
         )
+
+
+def assert_complete_embeddings(snapshot: CorpusSnapshot, *, label: str) -> None:
+    if snapshot.chunk_count <= 0:
+        raise GateError(f"{label} corpus contains no SEC chunks")
+    if snapshot.embedded_chunk_count != snapshot.chunk_count:
+        raise GateError(
+            f"{label} corpus has missing embeddings "
+            f"({snapshot.embedded_chunk_count}/{snapshot.chunk_count})"
+        )
+
+
+def assert_same_database_server(
+    old: tuple[str, str, int], new: tuple[str, str, int]
+) -> None:
+    if old[0] == new[0]:
+        raise GateError("old and new connections point to the same PostgreSQL database")
+    if old[1:] != new[1:]:
+        raise GateError(
+            "old and new databases must run on the same PostgreSQL server for paired latency"
+        )
+
+
+def assert_same_retrieval_environment(old: str, new: str) -> None:
+    if old != new:
+        raise GateError("old and new retrieval schema/index fingerprints differ")
 
 
 def identity_digest(snapshot: CorpusSnapshot) -> str:
@@ -206,6 +276,72 @@ def load_dataset(path: Path) -> tuple[list[dict[str, Any]], str]:
     if len(ids) != len(set(ids)):
         raise GateError("dataset contains duplicate financebench_id values")
     return rows, hashlib.sha256(raw).hexdigest()
+
+
+def validate_dataset_contract(
+    profile: str,
+    rows: Sequence[dict[str, Any]],
+    dataset_sha256: str,
+) -> None:
+    contract = DATASET_CONTRACTS.get(profile)
+    if contract is None:
+        raise GateError(f"unknown gate profile: {profile}")
+    if dataset_sha256 != contract["sha256"] or len(rows) != contract["queries"]:
+        raise GateError(
+            f"{profile} gate requires frozen dataset "
+            f"sha256={contract['sha256']} queries={contract['queries']}"
+        )
+
+
+def validate_development_prerequisite(
+    profile: str,
+    development_report_path: Optional[Path],
+) -> Optional[str]:
+    if profile == "development":
+        if development_report_path is not None:
+            raise GateError("development profile does not accept --development-report")
+        return None
+    if development_report_path is None:
+        raise GateError("heldout profile requires an accepted --development-report")
+    raw = development_report_path.read_bytes()
+    try:
+        report = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise GateError(f"invalid development report JSON: {exc}") from exc
+    if not isinstance(report, dict):
+        raise GateError("development report must be a JSON object")
+    dataset = report.get("dataset") or {}
+    protocol = report.get("protocol") or {}
+    result = report.get("decision") or {}
+    if (
+        dataset.get("sha256") != DATASET_CONTRACTS["development"]["sha256"]
+        or dataset.get("queries") != DATASET_CONTRACTS["development"]["queries"]
+        or protocol.get("gate_profile") != "development"
+        or result.get("profile") != "development"
+        or result.get("accepted") is not True
+    ):
+        raise GateError("heldout gate requires an accepted frozen development report")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def validate_oracle_coverage(
+    rows: Sequence[dict[str, Any]],
+    old: dict[str, Any],
+    new: dict[str, Any],
+) -> int:
+    expected_spans = sum(len(gold_spans(row)) for row in rows)
+    if expected_spans <= 0:
+        raise GateError("frozen dataset contains no gold evidence spans")
+    for label, summary in (("old", old), ("new", new)):
+        absent = summary["gold_docs_absent"]
+        unresolvable = summary["gold_docs_unresolvable"]
+        measured = int(summary["gold_spans_measured"])
+        if absent or unresolvable or measured != expected_spans:
+            raise GateError(
+                f"{label} oracle coverage incomplete: measured={measured}/"
+                f"{expected_spans}, absent={absent}, unresolvable={unresolvable}"
+            )
+    return expected_spans
 
 
 async def _retrieve_once(
@@ -370,6 +506,11 @@ def write_report(path: Path, report: dict[str, Any]) -> None:
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     validate_distinct_urls(args.old_db_url, args.new_db_url)
     rows, dataset_sha256 = load_dataset(args.dataset)
+    validate_dataset_contract(args.gate_profile, rows, dataset_sha256)
+    development_report_sha256 = validate_development_prerequisite(
+        args.gate_profile,
+        args.development_report,
+    )
     old_pool = await create_pool(args.old_db_url)
     try:
         new_pool = await create_pool(args.new_db_url)
@@ -380,16 +521,23 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         old_runtime, new_runtime = await asyncio.gather(
             runtime_database_identity(old_pool), runtime_database_identity(new_pool)
         )
-        if old_runtime == new_runtime:
-            raise GateError("old and new connections point to the same PostgreSQL database")
+        assert_same_database_server(old_runtime, new_runtime)
 
         old_snapshot, new_snapshot = await asyncio.gather(
             corpus_snapshot(old_pool), corpus_snapshot(new_pool)
         )
+        old_environment, new_environment = await asyncio.gather(
+            retrieval_environment_fingerprint(old_pool),
+            retrieval_environment_fingerprint(new_pool),
+        )
+        assert_same_retrieval_environment(old_environment, new_environment)
         assert_identity_sets_match(old_snapshot, new_snapshot)
+        assert_complete_embeddings(old_snapshot, label="old")
+        assert_complete_embeddings(new_snapshot, label="new")
         old_oracle, new_oracle = await asyncio.gather(
             oracle_summary(old_pool, rows), oracle_summary(new_pool, rows)
         )
+        expected_gold_spans = validate_oracle_coverage(rows, old_oracle, new_oracle)
 
         # The parser cache is process-global. Identical company identities make
         # the second load equivalent while ensuring aliases are ready before timing.
@@ -424,6 +572,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 "order": "alternating old/new per question",
                 "p95": "nearest-rank",
                 "gate_profile": args.gate_profile,
+                "development_report_sha256": development_report_sha256,
             },
             "corpus_identity": {
                 "sha256": identity_digest(old_snapshot),
@@ -431,9 +580,13 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 "filings": len(old_snapshot.filings),
                 "old_chunks": old_snapshot.chunk_count,
                 "new_chunks": new_snapshot.chunk_count,
+                "old_embedded_chunks": old_snapshot.embedded_chunk_count,
+                "new_embedded_chunks": new_snapshot.embedded_chunk_count,
             },
             "databases": {"old": old_runtime[0], "new": new_runtime[0]},
+            "retrieval_environment_sha256": old_environment,
             "oracle": {
+                "expected_gold_spans": expected_gold_spans,
                 "old": old_oracle,
                 "new": new_oracle,
                 "strict_reachability_non_regression": (
@@ -470,6 +623,11 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         required=True,
         choices=("development", "heldout"),
     )
+    parser.add_argument(
+        "--development-report",
+        type=Path,
+        help="Required accepted frozen-development report for heldout evaluation",
+    )
     parser.add_argument("--alpha", type=float, default=0.7)
     parser.add_argument("--warmup-rounds", type=int, default=1)
     parser.add_argument("--measured-rounds", type=int, default=3)
@@ -491,7 +649,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"paired retrieval gate failed: {exc}")
         return 1
     print(json.dumps(report, indent=2, ensure_ascii=False))
-    return 0
+    return 0 if report["decision"]["accepted"] else 1
 
 
 if __name__ == "__main__":

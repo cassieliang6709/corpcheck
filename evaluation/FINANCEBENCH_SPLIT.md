@@ -48,13 +48,22 @@ The materializer verifies both source hashes, derives `doc_type` and
 frozen counts, and refuses to overwrite different output. The locked output has
 SHA-256
 `f2d8ba8b3f1717166c862cc320c8c7a7678d19a4f3dd9c9438f1a74519ad5eae`.
-The deduplicated 45-document ingestion manifest has SHA-256
+The deduplicated 45-document corpus-requirements manifest has SHA-256
 `2b17d7354f4a49f78f249422d49d3df9269d2c0977da0403ed878671f7aa4b10`.
 
 The dataset is materialized locally but retrieval evaluation is not yet
 runnable: the 45 filings still need to be added to an isolated corpus. The 21
 issuer mappings are available for explicit ingestion but remain outside the
 default 50-company universe.
+
+This requirements manifest is not yet safe to drive downloads. Before corpus
+construction, each document must be enriched and frozen with its canonical
+ticker, CIK, exact accession, filed date, period of report, selected SEC raw
+component, and SHA-256. The ingestion runner must reject missing, extra,
+amended, or mismatched filings and prove that both representations consume the
+same immutable raw-file set. This is especially important for delisted ATVI,
+historical Square filings now resolved through Block/XYZ, and the eight selected
+documents earlier than the default 2018 start year.
 
 ## Acceptance gates
 
@@ -70,4 +79,6 @@ filings, embeddings, query order, and warm-up:
 If the development gate fails, reject the representation arm without tuning on
 held-out results. If it passes, evaluate held-out once for the stop/continue
 decision. A failed held-out gate rejects the arm; it does not start another round
-of held-out-driven rules.
+of held-out-driven rules. The held-out runner requires the accepted frozen
+development report as `--development-report`; it records that report's SHA-256
+and refuses to start without it.

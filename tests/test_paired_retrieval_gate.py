@@ -27,6 +27,7 @@ def snapshot(*, chunks: int = 10, ticker: str = "AMD") -> runner.CorpusSnapshot:
             }
         ),
         chunk_count=chunks,
+        embedded_chunk_count=chunks,
     )
 
 
@@ -54,6 +55,35 @@ def test_identity_comparison_allows_chunk_count_change_only() -> None:
     runner.assert_identity_sets_match(snapshot(chunks=10), snapshot(chunks=12))
     with pytest.raises(runner.GateError, match="company identity"):
         runner.assert_identity_sets_match(snapshot(), snapshot(ticker="AMZN"))
+
+
+def test_incomplete_embeddings_are_rejected() -> None:
+    incomplete = runner.CorpusSnapshot(
+        companies=snapshot().companies,
+        filings=snapshot().filings,
+        chunk_count=10,
+        embedded_chunk_count=9,
+    )
+    with pytest.raises(runner.GateError, match="missing embeddings"):
+        runner.assert_complete_embeddings(incomplete, label="new")
+
+
+def test_paired_latency_requires_same_database_server() -> None:
+    runner.assert_same_database_server(
+        ("old_db", "127.0.0.1", 5432),
+        ("new_db", "127.0.0.1", 5432),
+    )
+    with pytest.raises(runner.GateError, match="same PostgreSQL server"):
+        runner.assert_same_database_server(
+            ("old_db", "10.0.0.1", 5432),
+            ("new_db", "10.0.0.2", 5432),
+        )
+
+
+def test_retrieval_environment_must_match() -> None:
+    runner.assert_same_retrieval_environment("same", "same")
+    with pytest.raises(runner.GateError, match="fingerprints differ"):
+        runner.assert_same_retrieval_environment("old", "new")
 
 
 def test_nearest_rank_p95() -> None:
@@ -101,6 +131,59 @@ def test_load_dataset_records_sha_and_rejects_duplicate_ids(tmp_path: Path) -> N
     path.write_text(json.dumps([dataset_row(), dataset_row()]), encoding="utf-8")
     with pytest.raises(runner.GateError, match="duplicate"):
         runner.load_dataset(path)
+
+
+def test_gate_profile_is_bound_to_frozen_dataset_hash_and_count() -> None:
+    rows = [dataset_row(str(index)) for index in range(35)]
+    runner.validate_dataset_contract(
+        "development",
+        rows,
+        runner.DATASET_CONTRACTS["development"]["sha256"],
+    )
+    with pytest.raises(runner.GateError, match="requires frozen dataset"):
+        runner.validate_dataset_contract("development", rows, "wrong")
+    with pytest.raises(runner.GateError, match="requires frozen dataset"):
+        runner.validate_dataset_contract(
+            "heldout",
+            rows,
+            runner.DATASET_CONTRACTS["heldout"]["sha256"],
+        )
+
+
+def test_incomplete_oracle_coverage_is_rejected_even_when_both_are_empty() -> None:
+    rows = [dataset_row()]
+    empty = {
+        "gold_spans_measured": 0,
+        "gold_docs_absent": ["AMD_2022_10K"],
+        "gold_docs_unresolvable": [],
+    }
+    with pytest.raises(runner.GateError, match="oracle coverage incomplete"):
+        runner.validate_oracle_coverage(rows, empty, empty)
+
+
+def test_heldout_requires_an_accepted_frozen_development_report(tmp_path: Path) -> None:
+    with pytest.raises(runner.GateError, match="requires an accepted"):
+        runner.validate_development_prerequisite("heldout", None)
+
+    report_path = tmp_path / "dev.json"
+    report = {
+        "dataset": {
+            "sha256": runner.DATASET_CONTRACTS["development"]["sha256"],
+            "queries": 35,
+        },
+        "protocol": {"gate_profile": "development"},
+        "decision": {"profile": "development", "accepted": True},
+    }
+    raw = json.dumps(report).encode()
+    report_path.write_bytes(raw)
+    assert runner.validate_development_prerequisite(
+        "heldout", report_path
+    ) == __import__("hashlib").sha256(raw).hexdigest()
+
+    report["decision"]["accepted"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    with pytest.raises(runner.GateError, match="accepted frozen development"):
+        runner.validate_development_prerequisite("heldout", report_path)
 
 
 @pytest.mark.asyncio
@@ -253,6 +336,34 @@ def test_write_report_refuses_different_existing_output(tmp_path: Path) -> None:
         runner.write_report(path, {"accepted": False})
 
 
+@pytest.mark.parametrize(("accepted", "expected_exit"), [(True, 0), (False, 1)])
+def test_main_exit_code_tracks_gate_decision(
+    monkeypatch, tmp_path: Path, accepted: bool, expected_exit: int
+) -> None:
+    report = {"decision": {"accepted": accepted}}
+
+    def fake_asyncio_run(coroutine):
+        coroutine.close()
+        return report
+
+    monkeypatch.setattr(runner.asyncio, "run", fake_asyncio_run)
+    exit_code = runner.main(
+        [
+            "--old-db-url",
+            "postgresql://u:p@old/old_db",
+            "--new-db-url",
+            "postgresql://u:p@new/new_db",
+            "--dataset",
+            str(tmp_path / "dataset.json"),
+            "--output",
+            str(tmp_path / "report.json"),
+            "--gate-profile",
+            "development",
+        ]
+    )
+    assert exit_code == expected_exit
+
+
 @pytest.mark.asyncio
 async def test_run_rejects_runtime_same_database_and_closes_pools(monkeypatch, tmp_path):
     closed: list[str] = []
@@ -274,6 +385,7 @@ async def test_run_rejects_runtime_same_database_and_closes_pools(monkeypatch, t
         return ("db", "127.0.0.1", 5432)
 
     monkeypatch.setattr(runner, "runtime_database_identity", same_identity)
+    monkeypatch.setattr(runner, "validate_dataset_contract", lambda *args: None)
     dataset = tmp_path / "data.json"
     dataset.write_text(json.dumps([dataset_row()]), encoding="utf-8")
     args = Namespace(
@@ -282,6 +394,7 @@ async def test_run_rejects_runtime_same_database_and_closes_pools(monkeypatch, t
         dataset=dataset,
         output=tmp_path / "out.json",
         gate_profile="development",
+        development_report=None,
         alpha=0.7,
         warmup_rounds=0,
         measured_rounds=1,

@@ -71,6 +71,20 @@ def database_name(database_url: str) -> str:
     return unquote(parsed.path.strip("/"))
 
 
+def validate_real_sec_user_agent(sec_user_agent: str) -> None:
+    """Require the SEC's two-token identity format and a non-placeholder email."""
+    try:
+        _, contact_email = parse_sec_user_agent(sec_user_agent)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+    normalized_agent = " ".join(sec_user_agent.split()).lower()
+    if (
+        "@" not in contact_email
+        or any(marker in normalized_agent for marker in PLACEHOLDER_USER_AGENT_MARKERS)
+    ):
+        raise ValidationError("SEC_USER_AGENT must contain a real, non-placeholder contact email")
+
+
 def validate_isolation(
     database_url: str,
     download_dir: Path,
@@ -98,16 +112,7 @@ def validate_isolation(
     ):
         raise ValidationError("refusing the default data/sec_filings download directory")
 
-    try:
-        _, contact_email = parse_sec_user_agent(sec_user_agent)
-    except ValueError as exc:
-        raise ValidationError(str(exc)) from exc
-    normalized_agent = " ".join(sec_user_agent.split()).lower()
-    if (
-        "@" not in contact_email
-        or any(marker in normalized_agent for marker in PLACEHOLDER_USER_AGENT_MARKERS)
-    ):
-        raise ValidationError("SEC_USER_AGENT must contain a real, non-placeholder contact email")
+    validate_real_sec_user_agent(sec_user_agent)
 
 
 def load_fixture(path: Path = FIXTURE_PATH) -> dict[str, Any]:
