@@ -36,12 +36,20 @@ ingestion = [
     "tqdm>=4.66",
     "yfinance>=0.2",
 ]
+# Model Context Protocol server. Optional because the HTTP API and the offline
+# evaluation harness never import it.
+mcp = [
+    "mcp>=2.0.0",
+]
 dev = [
     "anyio>=4.0.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.5.0",
 ]
+
+[project.scripts]
+corpcheck-mcp = "corpcheck.mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

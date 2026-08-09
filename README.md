@@ -38,7 +38,10 @@ src/corpcheck/
 │   ├── fusion.py          Score fusion strategy
 │   └── rerank.py          Evidence-form adjustments, citation titles
 ├── llm/chat.py            Grounded answer generation (OpenAI-compatible endpoint)
-└── api/main.py            FastAPI: /retrieve, /chat, /filters, /health
+├── api/main.py            FastAPI: /retrieve, /chat, /filters, /health
+└── mcp/                   Model Context Protocol server (stdio)
+    ├── server.py          Tools: check_answerable, search_filings, get_filing_context
+    └── provenance.py      Accession lookup + version governance on direct lookup
 
 evaluation/                Offline IR + end-to-end evaluation harness
 tests/                     Unit tests
@@ -68,6 +71,182 @@ cp .env.example .env
 
 `/retrieve` needs only Postgres. `/chat` additionally needs `SGLANG_BASE_URL`
 pointing at an OpenAI-compatible endpoint; it returns 503 when unset.
+
+## MCP server
+
+The same retrieval stack is exposed over the [Model Context
+Protocol](https://modelcontextprotocol.io) so any MCP client — Claude Code, Claude
+Desktop, or a custom agent — can query the filings directly.
+
+```bash
+.venv/bin/pip install -e ".[mcp]"
+.venv/bin/corpcheck-mcp          # or: .venv/bin/python -m corpcheck.mcp
+```
+
+stdio transport, so the client launches the process; it needs the same `.env` and
+the same populated Postgres the HTTP API does.
+
+### Registering it
+
+Claude Code:
+
+```bash
+claude mcp add corpcheck -- /abs/path/to/corpcheck/.venv/bin/corpcheck-mcp
+```
+
+Any client that reads a JSON config (`claude_desktop_config.json`, `.mcp.json`, …):
+
+```json
+{
+  "mcpServers": {
+    "corpcheck": {
+      "command": "/abs/path/to/corpcheck/.venv/bin/corpcheck-mcp",
+      "env": { "DB_HOST": "localhost", "DB_PORT": "5432", "DB_NAME": "financial_rag" }
+    }
+  }
+}
+```
+
+Use an absolute path to the venv's script: the server imports `sentence-transformers`
+and `asyncpg`, so it must run on the project interpreter.
+
+### Tools
+
+| Tool | Purpose |
+| --- | --- |
+| `check_answerable` | Whether the corpus can support an answer — **no LLM is contacted** |
+| `search_filings` | Evidence blocks with company / filing type / fiscal year / period / accession |
+| `get_filing_context` | Untruncated source text around a chunk, or a filing opened by accession |
+
+All three route through `retrieval.pipeline.retrieve()`. The MCP layer is a
+protocol adapter and contains no search, ranking, or filtering logic of its own —
+which is what lets the offline IR numbers describe what an agent actually gets.
+
+`check_answerable` is the tool that matters. Everything else here is a retrieval
+API with better metadata; this one lets a client ask *"can you answer this?"*
+before it commits to answering, and get a deterministic reply computed from
+measured cosine similarities rather than from a model's self-assessment. An agent
+that calls it first has a defensible reason to say "the filings do not cover
+this" — which is the whole thesis of the project, exported to any client.
+
+Version governance applies on both paths: superseded chunks are dropped from the
+candidate pool inside `retrieve()`, and `get_filing_context` runs the same
+supersession check before returning text, so an agent holding a stale accession
+number cannot route around the filter.
+
+### A real session
+
+Transcript from `mcp.ClientSession` over stdio against the live corpus
+(469,874 chunks, 1,662 filings), abridged only where marked.
+
+**`check_answerable`, in-domain:**
+
+```json
+→ {"query": "What was Apple's total net sales in fiscal 2022?", "k": 5}
+
+← {
+    "answerable": true,
+    "gate_status": "pass",
+    "reason": "Evidence passed both confidence floors.",
+    "llm_consulted": false,
+    "similarity": {
+      "top1_cos_sim": 0.70896,
+      "mean_top3_cos_sim": 0.6743513333333334,
+      "top1_min": 0.42,
+      "mean_top3_min": 0.4
+    },
+    "coverage": {
+      "retrieved": 5, "with_dense_score": 5, "sparse_only": 0,
+      "companies": ["AAPL"], "filing_types": ["10-K", "10-Q"],
+      "fiscal_years": [2022], "source_types": ["sec"]
+    },
+    "governance": {"revision_filter_enabled": true, "note": "..."}
+  }
+```
+
+**`check_answerable`, out-of-domain — the same call, refusing:**
+
+```json
+→ {"query": "What is the best recipe for sourdough bread?", "k": 5}
+
+← {
+    "answerable": false,
+    "gate_status": "below_top1_floor",
+    "reason": "The filings searched do not contain passages relevant enough to answer this question.",
+    "llm_consulted": false,
+    "similarity": {
+      "top1_cos_sim": 0.295165,
+      "mean_top3_cos_sim": 0.29333866666666664,
+      "top1_min": 0.42,
+      "mean_top3_min": 0.4
+    },
+    "coverage": {"retrieved": 5, "companies": ["MPC"], "fiscal_years": [2020, 2023, 2024, 2025]}
+  }
+```
+
+Note that retrieval still returned five chunks — it always does. The refusal comes
+from measuring them, not from an empty result set.
+
+**`search_filings`** (top hit of three shown):
+
+```json
+→ {"query": "Apple total net sales fiscal 2022", "k": 3, "company": "AAPL"}
+
+← {"results": [{
+    "chunk_id": "39192",
+    "source_type": "sec",
+    "company": "AAPL",
+    "filing_type": "10-K",
+    "fiscal_year": 2022,
+    "period": "annual",
+    "filed_date": "2022-10-28",
+    "accession_number": "0000320193-22-000108",
+    "cik": "0000320193",
+    "section": "Selected Financial Data",
+    "chunk_index": 56,
+    "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019322000108/0000320193-22-000108-index.htm",
+    "score": 1.097368,
+    "cos_sim": 0.736293,
+    "text": "Apple Inc. | 2022 Form 10-K | 19 … Fiscal 2022 Highlights \n Total net sales increased 8% or $28.5 billion during 2022 compared to 2021, driven primarily by higher net sales of iPhone, Services and Mac. …",
+    "text_truncated": false
+  }],
+  "abstain": {"would_abstain": false, "top1_cos_sim": 0.736293, "mean_top3_cos_sim": 0.670791},
+  "governance": {"revision_filter_enabled": true}}
+```
+
+**`get_filing_context`**, widening that hit (chunk texts abridged):
+
+```json
+→ {"chunk_id": "39192", "window": 1}
+
+← {
+    "filing": {
+      "company": "AAPL", "company_name": "Apple Inc.", "filing_type": "10-K",
+      "fiscal_year": 2022, "period": "annual", "filed_date": "2022-10-28",
+      "period_of_report": "2022-09-24",
+      "accession_number": "0000320193-22-000108", "cik": "0000320193"
+    },
+    "superseded": false,
+    "anchor_chunk_id": "39192",
+    "chunks": [
+      {"chunk_id": "39191", "chunk_index": 55, "section": "Mine Safety Disclosures", "is_anchor": false, "text": "[TABLE] Table 14 …"},
+      {"chunk_id": "39192", "chunk_index": 56, "section": "Selected Financial Data", "is_anchor": true,  "text": "… Total net sales increased 8% or $28.5 billion during 2022 …"},
+      {"chunk_id": "39193", "chunk_index": 57, "section": "Selected Financial Data", "is_anchor": false, "text": "… During 2022, the Company repurchased $90.2 billion of its common stock …"}
+    ]
+  }
+```
+
+`get_filing_context` also accepts `accession_number` instead of `chunk_id`, which
+opens the filing from `chunk_index` 0.
+
+### Measured limitation
+
+The revision filter is wired into all three tools, but the corpus currently loaded
+contains **no amended filings** — 0 of 1,662 `filings` rows have a `filing_type`
+ending in `/A`. So the supersession path is covered by unit tests
+(`tests/test_mcp_server.py`) and by `tests/test_revision.py`, not by the live
+session above. Nothing here has been demonstrated to suppress a real superseded
+chunk, because there is not yet a real superseded chunk to suppress.
 
 ## Data
 
@@ -163,3 +342,6 @@ Phase 1 progress:
       the retrieved evidence is too weak. Gated on raw dense cosine rather than
       the fused score, with thresholds calibrated against the corpus
       (`evaluation/calibrate_abstain.py`).
+- [x] **MCP server** — `check_answerable` / `search_filings` / `get_filing_context`
+      over stdio, routed through the same `retrieve()` entry point. Exports the
+      abstain gate as something a client can query *before* answering.
