@@ -138,10 +138,11 @@ async def superseded_check(
     if not is_superseded(key, superseded):
         return False, None
 
+    scope = f" section {key.section!r}" if key.section else ""
     return True, (
         f"{key.ticker} {key.base_filing_type} FY{key.fiscal_year}"
-        f"{'/' + key.period if key.period else ''} has been superseded by a later "
-        f"amendment ({key.base_filing_type}/A). Its text is withheld: quoting a "
-        "figure the filer has since restated is the most damaging error this "
+        f"{'/' + key.period if key.period else ''}{scope} has been superseded by a "
+        f"later amendment ({key.base_filing_type}/A). Its text is withheld: quoting a "
+        "disclosure the filer has since changed is the most damaging error this "
         "system can make. Search for the amendment instead."
     )

@@ -55,8 +55,9 @@ If it says answerable=false, say so — do not answer from prior knowledge and
 present it as if it came from the filings.
 
 Every evidence block carries the company, filing type, fiscal year, period, and
-SEC accession number. Cite those. Filings superseded by a later amendment
-(10-K/A, 10-Q/A) are excluded from results and withheld from direct lookup.
+SEC accession number. Cite those. Original chunks from sections replaced by a
+later amendment (10-K/A, 10-Q/A) are excluded from results and withheld from
+direct lookup; unchanged original sections remain available.
 """
 
 # Truncation guard for search results: an agent's context is finite, and 10 full
@@ -70,8 +71,8 @@ def _corpus_governance() -> dict[str, Any]:
     return {
         "revision_filter_enabled": config.REVISION_FILTER_ENABLED,
         "note": (
-            "Chunks from filings superseded by a later amendment are dropped from "
-            "the candidate pool before ranking."
+            "Original chunks from amended sections are dropped from the candidate "
+            "pool before ranking; unchanged sections remain available."
             if config.REVISION_FILTER_ENABLED
             else "REVISION_FILTER_ENABLED is off: results MAY include superseded "
             "filings. Do not rely on these results for authoritative figures."
@@ -212,8 +213,8 @@ def build_server() -> MCPServer:
         description=(
             "Hybrid dense + sparse retrieval over the SEC filing corpus. Returns "
             "evidence blocks with full provenance: company, filing type, fiscal "
-            "year, period, and SEC accession number. Chunks from filings superseded "
-            "by a later amendment are excluded. The response also carries the "
+            "year, period, and SEC accession number. Original chunks from sections "
+            "replaced by a later amendment are excluded. The response also carries the "
             "abstain-gate verdict, so weak evidence is visibly labelled as weak "
             "rather than silently returned as if it were solid."
         ),
@@ -273,8 +274,8 @@ def build_server() -> MCPServer:
             "Fetch untruncated source text. Given a chunk_id, returns that chunk "
             "plus its neighbours in document order so a quotation can be read in "
             "context. Given an accession_number, opens that filing from the "
-            "beginning. Text from a filing superseded by a later amendment is "
-            "withheld."
+            "beginning. Text from an original section replaced by a later amendment "
+            "is withheld; unchanged original sections remain available."
         ),
     )
     async def get_filing_context(
@@ -314,8 +315,8 @@ def build_server() -> MCPServer:
                 }
             anchor = await pool.fetchrow(
                 """
-                SELECT c.filing_id, c.chunk_index, c.ticker, c.filing_type,
-                       c.fiscal_year, c.period
+                SELECT c.filing_id, c.chunk_index, c.section_name, c.ticker,
+                       c.filing_type, c.fiscal_year, c.period
                 FROM chunks c
                 WHERE c.id = $1
                 """,
@@ -330,9 +331,17 @@ def build_server() -> MCPServer:
         else:
             anchor = await pool.fetchrow(
                 """
-                SELECT id AS filing_id, ticker, filing_type, fiscal_year, period
-                FROM filings
-                WHERE accession_number = $1
+                SELECT f.id AS filing_id, f.ticker, f.filing_type, f.fiscal_year,
+                       f.period, first_chunk.section_name
+                FROM filings AS f
+                LEFT JOIN LATERAL (
+                    SELECT c.section_name
+                    FROM chunks AS c
+                    WHERE c.filing_id = f.id
+                    ORDER BY c.chunk_index NULLS LAST, c.id
+                    LIMIT 1
+                ) AS first_chunk ON TRUE
+                WHERE f.accession_number = $1
                 """,
                 accession_number,
             )
@@ -353,6 +362,7 @@ def build_server() -> MCPServer:
                 "filing_type": anchor["filing_type"],
                 "fiscal_year": anchor["fiscal_year"],
                 "period_label": anchor["period"],
+                "section_name": anchor["section_name"],
             },
         )
         if blocked:

@@ -22,7 +22,6 @@ from corpcheck.retrieval.revision import (
     log_dropped,
 )
 
-
 # ── is_amendment ────────────────────────────────────────────────────────────
 
 class TestIsAmendment:
@@ -118,6 +117,27 @@ class TestFilingKeyForRow:
         assert key is not None
         assert key.period is None
 
+    def test_normalizes_section_name(self) -> None:
+        key = filing_key_for_row(_row(section_name="  Market   for Common Equity "))
+        assert key is not None
+        assert key.section == "MARKET FOR COMMON EQUITY"
+
+    def test_normalizes_raw_10k_item_to_canonical_section(self) -> None:
+        key = filing_key_for_row(_row(section_name="Item 5"))
+        assert key is not None
+        assert key.section == "MARKET FOR COMMON EQUITY"
+
+    def test_ambiguous_raw_10q_item_becomes_wildcard(self) -> None:
+        key = filing_key_for_row(_row(filing_type="10-Q", section_name="Item 1"))
+        assert key is not None
+        assert key.section is None
+
+    @pytest.mark.parametrize("section_name", [None, "", "Full Document", "unknown"])
+    def test_unavailable_section_becomes_wildcard(self, section_name: str | None) -> None:
+        key = filing_key_for_row(_row(section_name=section_name))
+        assert key is not None
+        assert key.section is None
+
 
 # ── is_superseded ───────────────────────────────────────────────────────────
 
@@ -152,6 +172,27 @@ class TestIsSuperseded:
     def test_empty_superseded_set(self) -> None:
         key = FilingKey("AAPL", "10-K", 2022, "ANNUAL")
         assert is_superseded(key, frozenset()) is False
+
+    def test_matching_section_is_superseded(self) -> None:
+        key = FilingKey("AAPL", "10-K", 2022, "ANNUAL", "MARKET FOR COMMON EQUITY")
+        superseded = frozenset(
+            {FilingKey("AAPL", "10-K", 2022, "ANNUAL", "MARKET FOR COMMON EQUITY")}
+        )
+        assert is_superseded(key, superseded) is True
+
+    def test_unrelated_section_is_not_superseded(self) -> None:
+        key = FilingKey("AAPL", "10-K", 2022, "ANNUAL", "FINANCIAL STATEMENTS")
+        superseded = frozenset(
+            {FilingKey("AAPL", "10-K", 2022, "ANNUAL", "MARKET FOR COMMON EQUITY")}
+        )
+        assert is_superseded(key, superseded) is False
+
+    def test_candidate_without_section_is_conservatively_superseded(self) -> None:
+        key = FilingKey("AAPL", "10-K", 2022, "ANNUAL")
+        superseded = frozenset(
+            {FilingKey("AAPL", "10-K", 2022, "ANNUAL", "MARKET FOR COMMON EQUITY")}
+        )
+        assert is_superseded(key, superseded) is True
 
 
 # ── filter_superseded_rows ──────────────────────────────────────────────────
@@ -191,6 +232,29 @@ class TestFilterSupersededRows:
         kept, _ = filter_superseded_rows(rows, superseded)
         kept_ids = {r["chunk_id"] for r in kept}
         assert "c2" in kept_ids
+
+    def test_only_matching_original_section_is_dropped(self) -> None:
+        rows = [
+            _row(chunk_id="item-5", section_name="Market for Common Equity"),
+            _row(chunk_id="item-8", section_name="Financial Statements"),
+            _row(
+                chunk_id="amended-item-5",
+                filing_type="10-K/A",
+                section_name="Market for Common Equity",
+            ),
+        ]
+        superseded = frozenset(
+            {
+                FilingKey(
+                    "AAPL", "10-K", 2022, "ANNUAL", "MARKET FOR COMMON EQUITY"
+                )
+            }
+        )
+
+        kept, dropped = filter_superseded_rows(rows, superseded)
+
+        assert [row["chunk_id"] for row in dropped] == ["item-5"]
+        assert [row["chunk_id"] for row in kept] == ["item-8", "amended-item-5"]
 
     def test_empty_superseded_is_noop(self) -> None:
         rows = self._build_rows()

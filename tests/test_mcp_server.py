@@ -135,7 +135,7 @@ class FakePool:
 
 
 @pytest.mark.asyncio
-async def test_direct_lookup_withholds_a_superseded_filing():
+async def test_direct_lookup_without_section_uses_conservative_wildcard():
     pool = FakePool(
         [{"ticker": "AAPL", "filing_type": "10-K/A", "fiscal_year": 2022, "period": "annual"}]
     )
@@ -151,6 +151,64 @@ async def test_direct_lookup_withholds_a_superseded_filing():
     )
     assert blocked is True
     assert "superseded" in message
+
+
+@pytest.mark.asyncio
+async def test_direct_lookup_withholds_an_original_amended_section():
+    pool = FakePool(
+        [
+            {
+                "ticker": "GME",
+                "filing_type": "10-K/A",
+                "fiscal_year": 2024,
+                "period": "annual",
+                "section_name": "Market for Common Equity",
+            }
+        ]
+    )
+    blocked, message = await superseded_check(
+        pool,
+        {
+            "source_type": "sec",
+            "company": "GME",
+            "filing_type": "10-K",
+            "fiscal_year": 2024,
+            "period_label": "annual",
+            "section_name": "Market for Common Equity",
+        },
+    )
+
+    assert blocked is True
+    assert "section 'MARKET FOR COMMON EQUITY'" in message
+
+
+@pytest.mark.asyncio
+async def test_direct_lookup_allows_an_unamended_original_section():
+    pool = FakePool(
+        [
+            {
+                "ticker": "GME",
+                "filing_type": "10-K/A",
+                "fiscal_year": 2024,
+                "period": "annual",
+                "section_name": "Market for Common Equity",
+            }
+        ]
+    )
+    blocked, message = await superseded_check(
+        pool,
+        {
+            "source_type": "sec",
+            "company": "GME",
+            "filing_type": "10-K",
+            "fiscal_year": 2024,
+            "period_label": "annual",
+            "section_name": "Financial Statements",
+        },
+    )
+
+    assert blocked is False
+    assert message is None
 
 
 @pytest.mark.asyncio
