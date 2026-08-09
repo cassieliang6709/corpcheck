@@ -1,0 +1,89 @@
+[
+  {
+    "id": "financebench_id_08286",
+    "question": "By drawing conclusions from the information stated only in the income statement, what is Amazon's FY2019 net income attributable to shareholders (in USD millions)?",
+    "should_abstain": false,
+    "expected_values": [11588],
+    "company": "AMZN",
+    "filing_type": "10-K",
+    "year": 2019,
+    "source": "FinanceBench"
+  },
+  {
+    "id": "financebench_id_04209",
+    "question": "Using only the information within the balance sheet, how much total assets did Costco have at the end of FY2021? Answer in USD millions.",
+    "should_abstain": false,
+    "expected_values": [59268],
+    "company": "COST",
+    "filing_type": "10-K",
+    "year": 2021,
+    "source": "FinanceBench"
+  },
+  {
+    "id": "financebench_id_00757",
+    "question": "Did AMD report customer concentration in FY22?",
+    "should_abstain": false,
+    "expected_values": ["one customer", 16, "consolidated net revenue"],
+    "company": "AMD",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench"
+  },
+  {
+    "id": "financebench_id_00563",
+    "question": "From FY21 to FY22, excluding Embedded, in which AMD reporting segment did sales proportionally increase the most?",
+    "should_abstain": false,
+    "expected_values": ["Data Center"],
+    "company": "AMD",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench"
+  },
+  {
+    "id": "financebench_id_05915",
+    "question": "What is the FY2018 fixed asset turnover ratio for CVS Health? Fixed asset turnover ratio is defined as: FY2018 revenue / (average PP&E between FY2017 and FY2018). Round your answer to two decimal places.",
+    "should_abstain": false,
+    "expected_values": [17.98],
+    "company": "CVS",
+    "filing_type": "10-K",
+    "year": 2018,
+    "source": "FinanceBench"
+  },
+  {
+    "id": "financebench_id_04302",
+    "question": "Using the income statement, what was Nike's three-year average cost of goods sold as a percentage of revenue from FY2016 to FY2018? Round to one decimal place.",
+    "should_abstain": false,
+    "expected_values": [55.1],
+    "company": "NKE",
+    "filing_type": "10-K",
+    "year": 2018,
+    "source": "FinanceBench"
+  },
+  {
+    "id": "financebench_id_00206",
+    "question": "Are JPM's gross margins historically consistent? If gross margin is not relevant for this company, state that and explain why.",
+    "should_abstain": false,
+    "expected_values": ["financial institution", "not a relevant metric"],
+    "company": "JPM",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench"
+  },
+  {
+    "id": "abstain_future_costco_2099",
+    "question": "What were Costco's total assets at the end of FY2099?",
+    "should_abstain": true,
+    "company": "COST",
+    "filing_type": "10-K",
+    "year": 2099,
+    "source": "deliberate out-of-corpus control"
+  },
+  {
+    "id": "abstain_private_openai_2023",
+    "question": "According to its SEC annual filing, what was OpenAI's net income in FY2023?",
+    "should_abstain": true,
+    "filing_type": "10-K",
+    "year": 2023,
+    "source": "deliberate out-of-corpus control"
+  }
+]

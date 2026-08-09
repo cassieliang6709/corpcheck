@@ -7,6 +7,7 @@ import pytest
 from corpcheck.models import ChunkResult
 from corpcheck.retrieval.abstain import (
     AbstainDecision,
+    evaluate_answerability,
     evaluate_confidence,
     should_abstain,
 )
@@ -23,14 +24,18 @@ def _chunk(
     cos_sim: float | None,
     chunk_id: str = "c1",
     score: float = 1.0,
+    company: str = "AAPL",
+    fiscal_year: int | None = None,
+    text: str = "Sample text",
 ) -> ChunkResult:
     """A candidate row. ``score`` defaults high to prove it is *not* consulted."""
     return ChunkResult(
         chunk_id=chunk_id,
-        text="Sample text",
+        text=text,
         score=score,
         cos_sim=cos_sim,
-        company="AAPL",
+        company=company,
+        fiscal_year=fiscal_year,
     )
 
 
@@ -131,6 +136,144 @@ class TestAbstainDecision:
 
     def test_detail_handles_absent_measurements(self) -> None:
         assert AbstainDecision(False).detail == "top1=n/a mean_top3=n/a"
+
+    def test_status_defaults_preserve_manual_construction(self) -> None:
+        assert AbstainDecision(True, "nope").status == "abstain"
+        assert AbstainDecision(False).status == "pass"
+
+
+class TestEvaluateAnswerability:
+    @pytest.fixture(autouse=True)
+    def company_caches(self, monkeypatch) -> None:
+        from corpcheck.retrieval import query_parse
+
+        names = {
+            "AAPL": "Apple Inc",
+            "AMZN": "Amazon.com, Inc.",
+            "COST": "Costco Wholesale Corporation",
+        }
+        aliases: dict[str, str] = {}
+        for ticker, name in names.items():
+            for alias in query_parse._generate_company_aliases(name):
+                aliases.setdefault(alias, ticker)
+        monkeypatch.setattr(query_parse, "_known_tickers", set(names))
+        monkeypatch.setattr(query_parse, "_company_alias_to_ticker", aliases)
+
+    def test_future_year_abstains_despite_strong_costco_chunks(self) -> None:
+        results = [
+            _chunk(STRONG, f"c{year}", company="COST", fiscal_year=year)
+            for year in range(2020, 2027)
+        ]
+        decision = evaluate_answerability(
+            "What were Costco's total assets at the end of FY2099?", results
+        )
+        assert decision.abstain is True
+        assert decision.status == "year_mismatch"
+
+    def test_matching_company_and_year_reach_cosine_gate(self) -> None:
+        results = [_chunk(STRONG, company="COST", fiscal_year=2021)]
+        decision = evaluate_answerability("Costco FY2021 total assets", results)
+        assert decision.abstain is False
+        assert decision.status == "pass"
+
+    def test_known_company_mismatch_abstains(self) -> None:
+        results = [_chunk(STRONG, company="AAPL", fiscal_year=2021)]
+        decision = evaluate_answerability("Costco FY2021 total assets", results)
+        assert decision.abstain is True
+        assert decision.status == "company_mismatch"
+
+    def test_unknown_sec_issuer_abstains(self) -> None:
+        results = [_chunk(STRONG, company="AAPL", fiscal_year=2023)]
+        decision = evaluate_answerability(
+            "According to its SEC annual filing, what was OpenAI's net income in FY2023?",
+            results,
+        )
+        assert decision.abstain is True
+        assert decision.status == "unknown_company"
+
+    def test_explicit_company_filter_ignores_other_possessive_names(self) -> None:
+        decision = evaluate_answerability(
+            "According to the SEC filing, what was CEO's compensation in FY2023?",
+            [_chunk(STRONG, company="AAPL", fiscal_year=2023)],
+            expected_company="AAPL",
+        )
+        assert decision.abstain is False
+        assert decision.status == "pass"
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "What was the company's FY2023 net income in its SEC filing?",
+            "What was management's FY2023 outlook in the SEC filing?",
+        ],
+    )
+    def test_generic_possessives_do_not_trigger_unknown_company(self, query) -> None:
+        decision = evaluate_answerability(
+            query, [_chunk(STRONG, company="AAPL", fiscal_year=2023)]
+        )
+        assert decision.abstain is False
+
+    @pytest.mark.parametrize(
+        ("query", "company"),
+        [
+            ("What did Costco's SEC annual filing report for FY2023?", "COST"),
+            ("What did Amazon's SEC annual filing report for FY2023?", "AMZN"),
+            ("What did Apple Inc's SEC annual filing report for FY2023?", "AAPL"),
+        ],
+    )
+    def test_known_possessive_forms_resolve_normally(self, query, company) -> None:
+        decision = evaluate_answerability(
+            query, [_chunk(STRONG, company=company, fiscal_year=2023)]
+        )
+        assert decision.abstain is False
+
+    def test_comparative_query_needs_year_intersection_not_every_year(self) -> None:
+        result = [_chunk(STRONG, company="AAPL", fiscal_year=2023)]
+        assert not evaluate_answerability(
+            "Compare AAPL FY2023 versus FY2022", result
+        ).abstain
+        decision = evaluate_answerability(
+            "Compare AAPL FY2023 versus FY2022",
+            [_chunk(STRONG, company="AAPL", fiscal_year=2021)],
+        )
+        assert decision.status == "year_mismatch"
+
+    def test_later_filing_text_can_cover_an_earlier_requested_year(self) -> None:
+        result = _chunk(
+            STRONG,
+            company="AAPL",
+            fiscal_year=2023,
+            text="Comparative net income for 2022 was $99 million.",
+        )
+        decision = evaluate_answerability("AAPL net income in FY2022", [result])
+        assert decision.abstain is False
+        assert decision.status == "pass"
+
+    def test_year_must_be_covered_by_the_requested_company(self) -> None:
+        results = [
+            _chunk(STRONG, "cost", company="COST", fiscal_year=2022),
+            _chunk(
+                STRONG,
+                "apple",
+                company="AAPL",
+                fiscal_year=2023,
+                text="Results for 2023.",
+            ),
+        ]
+        decision = evaluate_answerability("Costco total assets in FY2023", results)
+        assert decision.abstain is True
+        assert decision.status == "year_mismatch"
+
+    def test_no_company_or_year_preserves_confidence_behavior(self) -> None:
+        results = [_chunk(WEAK)]
+        expected = evaluate_confidence(results)
+        actual = evaluate_answerability("What are the main business risks?", results)
+        assert (actual.abstain, actual.status) == (expected.abstain, expected.status)
+
+    def test_empty_results_preserve_existing_reason(self) -> None:
+        decision = evaluate_answerability("OpenAI's SEC annual filing", [])
+        assert decision.status == "no_results"
+        assert decision.reason == "No matching passages were retrieved."
 
 
 class TestShouldAbstainWrapper:

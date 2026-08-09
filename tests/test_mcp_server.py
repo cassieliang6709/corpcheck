@@ -13,9 +13,11 @@ from datetime import date
 
 import pytest
 
+from corpcheck.mcp import server as mcp_server
 from corpcheck.mcp.provenance import evidence_block, superseded_check
-from corpcheck.mcp.server import _coverage, _gate_status
+from corpcheck.mcp.server import _coverage, _gate_status, build_server
 from corpcheck.models import ChunkResult
+from corpcheck.retrieval.abstain import AbstainDecision
 
 
 def chunk(**overrides) -> ChunkResult:
@@ -115,6 +117,68 @@ def test_gate_status_catches_lone_strong_hit_surrounded_by_noise():
         chunk(chunk_id="3", cos_sim=0.10),
     ]
     assert _gate_status(results) == "below_mean_top3_floor"
+
+
+def test_gate_status_uses_metadata_decision_code_when_supplied():
+    decision = AbstainDecision(
+        True, "No matching year.", status="year_mismatch"
+    )
+    assert _gate_status([chunk(cos_sim=0.8)], decision) == "year_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_report_metadata_gate_status(monkeypatch):
+    chunks = [chunk(company="COST", fiscal_year=2023, cos_sim=0.8)]
+
+    async def fake_get_pool():
+        return object()
+
+    async def fake_retrieve(**kwargs):
+        return chunks
+
+    async def fake_provenance(pool, results):
+        return {}
+
+    monkeypatch.setattr(mcp_server, "get_pool", fake_get_pool)
+    monkeypatch.setattr(mcp_server, "retrieve", fake_retrieve)
+    monkeypatch.setattr(mcp_server, "load_filing_provenance", fake_provenance)
+
+    server = build_server()
+    check = server._tool_manager._tools["check_answerable"].fn
+    search = server._tool_manager._tools["search_filings"].fn
+    query = "What were Costco's total assets in FY2099?"
+
+    check_result = await check(query=query)
+    search_result = await search(query=query)
+
+    assert check_result["answerable"] is False
+    assert check_result["gate_status"] == "year_mismatch"
+    assert search_result["abstain"]["would_abstain"] is True
+    assert search_result["abstain"]["status"] == "year_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_mcp_company_filter_prevents_possessive_false_positive(monkeypatch):
+    chunks = [chunk(company="AAPL", fiscal_year=2023, cos_sim=0.8)]
+
+    async def fake_get_pool():
+        return object()
+
+    async def fake_retrieve(**kwargs):
+        return chunks
+
+    monkeypatch.setattr(mcp_server, "get_pool", fake_get_pool)
+    monkeypatch.setattr(mcp_server, "retrieve", fake_retrieve)
+
+    server = build_server()
+    check = server._tool_manager._tools["check_answerable"].fn
+    result = await check(
+        query="According to the SEC filing, what was CEO's compensation in FY2023?",
+        company="AAPL",
+    )
+
+    assert result["answerable"] is True
+    assert result["gate_status"] == "pass"
 
 
 # --------------------------------------------------------------------------

@@ -93,6 +93,21 @@ _QUARTER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Unknown-issuer detection is intentionally narrower than company resolution.
+# It only supports a possessive proper name in a question that explicitly asks
+# about an SEC filing. That covers clear requests such as "OpenAI's SEC annual
+# filing" without treating every capitalised word as a company.
+_SEC_FILING_INTENT_RE = re.compile(
+    r"\b(?:SEC|10-K|10-Q|annual\s+filing|quarterly\s+filing)\b", re.IGNORECASE
+)
+_POSSESSIVE_PROPER_NAME_RE = re.compile(
+    r"\b("
+    r"[A-Z][A-Za-z0-9]*(?:[.&-][A-Za-z0-9]+)*"
+    r"(?:\s+(?:of|and|&|[A-Z][A-Za-z0-9]*(?:[.&-][A-Za-z0-9]+)*)){0,4}"
+    r")[\u2019']s\b"
+)
+_GENERIC_POSSESSIVE_NAMES = {"company", "filing", "issuer", "management"}
+
 
 def _normalize_company_text(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
@@ -224,6 +239,26 @@ def detect_company_in_query(query: str) -> Optional[str]:
     for alias, ticker in aliases:
         if re.search(r"\b" + re.escape(alias) + r"\b", normalized_query):
             return ticker
+    return None
+
+
+def detect_unresolved_company_in_query(query: str) -> Optional[str]:
+    """Return a clear named issuer that is absent from the loaded corpus.
+
+    ``detect_company_in_query()`` returning ``None`` is normally ambiguous: the
+    question may not name a company at all. This deliberately conservative
+    detector only distinguishes the unknown-company case when SEC-filing intent
+    and possessive proper-name syntax occur together.
+    """
+    if detect_company_in_query(query) is not None:
+        return None
+    if _SEC_FILING_INTENT_RE.search(query) is None:
+        return None
+
+    for match in _POSSESSIVE_PROPER_NAME_RE.finditer(query):
+        candidate = match.group(1).strip()
+        if _normalize_company_text(candidate) not in _GENERIC_POSSESSIVE_NAMES:
+            return candidate
     return None
 
 

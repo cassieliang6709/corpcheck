@@ -16,6 +16,7 @@ from corpcheck.retrieval.query_parse import (
     _generate_company_aliases,
     detect_company_in_query,
     detect_filing_type_hint_in_query,
+    detect_unresolved_company_in_query,
     detect_year_in_query,
     detect_years_in_query,
 )
@@ -144,3 +145,27 @@ def test_two_digit_fiscal_year_signals_an_annual_filing():
     # Previously only the four-digit form set the annual hint.
     assert detect_filing_type_hint_in_query("AMD results for FY22") == "10-K"
     assert detect_filing_type_hint_in_query("AMD results for FY2022") == "10-K"
+
+
+def test_unknown_possessive_issuer_with_sec_intent_is_detected(company_caches):
+    query = "According to its SEC annual filing, what was OpenAI's net income in FY2023?"
+    assert detect_unresolved_company_in_query(query) == "OpenAI"
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "What was the company's FY2023 net income in its SEC filing?",
+        "What was management's FY2023 outlook in the SEC filing?",
+        "What was OpenAI's FY2023 net income?",
+    ],
+)
+def test_unknown_company_detection_stays_narrow(query, company_caches):
+    assert detect_unresolved_company_in_query(query) is None
+
+
+def test_known_possessive_company_is_not_unresolved(company_caches):
+    assert (
+        detect_unresolved_company_in_query("What did Costco's SEC annual filing report?")
+        is None
+    )

@@ -19,7 +19,7 @@ from corpcheck.models import (
     RetrieveResponse,
 )
 from corpcheck.retrieval import load_known_tickers, retrieve
-from corpcheck.retrieval.abstain import evaluate_confidence
+from corpcheck.retrieval.abstain import evaluate_answerability
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ async def chat_endpoint(req: ChatRequest, request: Request):
     # sending the context anyway would only invite a fluent guess. Sources are
     # still returned so the user can see what *was* found and judge for
     # themselves.
-    decision = evaluate_confidence(chunks)
+    decision = evaluate_answerability(req.query, chunks, expected_company=req.company)
     if decision:
         logger.info(
             "Abstained on query %r (%s)", req.query[:120], decision.detail

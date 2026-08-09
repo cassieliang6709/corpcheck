@@ -37,7 +37,11 @@ from corpcheck.mcp.provenance import (
 )
 from corpcheck.models import ChunkResult
 from corpcheck.retrieval import load_known_tickers, retrieve
-from corpcheck.retrieval.abstain import _dense_similarities, evaluate_confidence
+from corpcheck.retrieval.abstain import (
+    AbstainDecision,
+    _dense_similarities,
+    evaluate_answerability,
+)
 from corpcheck.retrieval.search import get_model
 
 logger = logging.getLogger(__name__)
@@ -99,7 +103,9 @@ def _coverage(chunks: list[ChunkResult]) -> dict[str, Any]:
     }
 
 
-def _gate_status(chunks: list[ChunkResult]) -> str:
+def _gate_status(
+    chunks: list[ChunkResult], decision: Optional[AbstainDecision] = None
+) -> str:
     """Name *which* condition decided the gate, for logs and for the caller.
 
     ``evaluate_confidence`` returns a user-facing sentence; this classifies the
@@ -107,6 +113,8 @@ def _gate_status(chunks: list[ChunkResult]) -> str:
     thresholds — the codes are derived from the identical similarity list the gate
     reads.
     """
+    if decision is not None:
+        return decision.status
     if not chunks:
         return "no_results"
     sims = _dense_similarities(chunks)
@@ -184,8 +192,8 @@ def build_server() -> MCPServer:
             filing_type=filing_type,
             fiscal_year=fiscal_year,
         )
-        decision = evaluate_confidence(chunks)
-        status = _gate_status(chunks)
+        decision = evaluate_answerability(query, chunks, expected_company=company)
+        status = _gate_status(chunks, decision)
         logger.info("check_answerable %r -> %s (%s)", query[:120], status, decision.detail)
 
         return {
@@ -249,7 +257,7 @@ def build_server() -> MCPServer:
             fiscal_year=fiscal_year,
         )
         prov = await load_filing_provenance(pool, chunks)
-        decision = evaluate_confidence(chunks)
+        decision = evaluate_answerability(query, chunks, expected_company=company)
 
         return {
             "query": query,
@@ -259,6 +267,7 @@ def build_server() -> MCPServer:
             ],
             "abstain": {
                 "would_abstain": decision.abstain,
+                "status": decision.status,
                 "reason": decision.reason or None,
                 "top1_cos_sim": decision.top1,
                 "mean_top3_cos_sim": decision.mean_top3,

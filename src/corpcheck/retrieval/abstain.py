@@ -49,6 +49,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Optional, Sequence
 
+from corpcheck.retrieval.query_parse import (
+    detect_company_in_query,
+    detect_unresolved_company_in_query,
+    detect_years_in_query,
+    resolve_company_filter,
+)
 from corpcheck.settings import ABSTAIN_MEAN_TOP3_MIN, ABSTAIN_TOP1_MIN
 
 if TYPE_CHECKING:
@@ -64,7 +70,7 @@ class AbstainDecision:
     ``detail`` carries the measured values for logs and evaluation.
     """
 
-    __slots__ = ("abstain", "reason", "top1", "mean_top3")
+    __slots__ = ("abstain", "reason", "top1", "mean_top3", "status")
 
     def __init__(
         self,
@@ -72,11 +78,13 @@ class AbstainDecision:
         reason: str = "",
         top1: Optional[float] = None,
         mean_top3: Optional[float] = None,
+        status: Optional[str] = None,
     ) -> None:
         self.abstain = abstain
         self.reason = reason
         self.top1 = top1
         self.mean_top3 = mean_top3
+        self.status = status or ("abstain" if abstain else "pass")
 
     def __bool__(self) -> bool:
         return self.abstain
@@ -122,7 +130,9 @@ def evaluate_confidence(
     enough to support an answer.
     """
     if not results:
-        return AbstainDecision(True, "No matching passages were retrieved.")
+        return AbstainDecision(
+            True, "No matching passages were retrieved.", status="no_results"
+        )
 
     sims = _dense_similarities(results)
     if not sims:
@@ -131,7 +141,7 @@ def evaluate_confidence(
         logger.warning(
             "Abstain gate skipped: no dense scores on %d candidates", len(results)
         )
-        return AbstainDecision(False)
+        return AbstainDecision(False, status="sparse_only_unmeasurable")
 
     top1 = sims[0]
     mean_top3 = sum(sims[:3]) / len(sims[:3])
@@ -143,6 +153,7 @@ def evaluate_confidence(
             "answer this question.",
             top1,
             mean_top3,
+            "below_top1_floor",
         )
 
     if mean_top3 < mean_top3_min:
@@ -152,9 +163,78 @@ def evaluate_confidence(
             "not enough supporting evidence to answer from.",
             top1,
             mean_top3,
+            "below_mean_top3_floor",
         )
 
-    return AbstainDecision(False, "", top1, mean_top3)
+    return AbstainDecision(False, "", top1, mean_top3, "pass")
+
+
+def evaluate_answerability(
+    query: str,
+    results: Sequence[ChunkResult],
+    expected_company: Optional[str] = None,
+) -> AbstainDecision:
+    """Apply explicit metadata coverage checks, then the cosine confidence gate."""
+    if not results:
+        return evaluate_confidence(results)
+
+    # An explicit API/MCP/evaluation filter is authoritative context. In that
+    # mode, possessives elsewhere in the question ("CEO's compensation") are
+    # not attempts to name an issuer.
+    unresolved_company = (
+        None
+        if expected_company is not None
+        else detect_unresolved_company_in_query(query)
+    )
+    if unresolved_company is not None:
+        return AbstainDecision(
+            True,
+            f"The named issuer ({unresolved_company}) is not represented in the "
+            "indexed filings.",
+            status="unknown_company",
+        )
+
+    requested_company = (
+        resolve_company_filter(expected_company)
+        if expected_company is not None
+        else detect_company_in_query(query)
+    )
+    if requested_company:
+        requested_company = requested_company.upper()
+    companies = {result.company.upper() for result in results if result.company}
+    if requested_company is not None and requested_company not in companies:
+        return AbstainDecision(
+            True,
+            "No retrieved filing passage matches the requested company.",
+            status="company_mismatch",
+        )
+
+    requested_years = set(detect_years_in_query(query))
+    company_results = (
+        [
+            result
+            for result in results
+            if result.company and result.company.upper() == requested_company
+        ]
+        if requested_company is not None
+        else results
+    )
+    evidence_years: set[str] = set()
+    for result in company_results:
+        if result.fiscal_year is not None:
+            evidence_years.add(str(result.fiscal_year))
+        # A later filing commonly contains comparative columns for an earlier
+        # year. Explicit years in the evidence text count as period coverage;
+        # detect_years_in_query already avoids accession-number substrings.
+        evidence_years.update(detect_years_in_query(result.text))
+    if requested_years and requested_years.isdisjoint(evidence_years):
+        return AbstainDecision(
+            True,
+            "No retrieved filing passage matches the requested fiscal year.",
+            status="year_mismatch",
+        )
+
+    return evaluate_confidence(results)
 
 
 def should_abstain(
