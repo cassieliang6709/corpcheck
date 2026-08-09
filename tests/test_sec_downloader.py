@@ -9,10 +9,27 @@ from corpcheck.ingestion.downloaders.sec_downloader import (
     _infer_fiscal_year,
     _infer_period,
     _parse_submission_metadata,
+    parse_sec_user_agent,
 )
 
 
 class SECDownloaderLimitTests(unittest.TestCase):
+    def test_sec_user_agent_requires_exact_project_and_email_tokens(self) -> None:
+        self.assertEqual(
+            parse_sec_user_agent("CorpCheck owner@example.org"),
+            ("CorpCheck", "owner@example.org"),
+        )
+        for invalid in (
+            "CorpCheck Validation owner@example.org",
+            "CorpCheck",
+            "CorpCheck owner-at-example.org",
+            "CorpCheck owner@example",
+            "CorpCheck owner@team@example.org",
+            "CorpCheck! owner@example.org",
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                parse_sec_user_agent(invalid)
+
     def test_10q_limit_expands_for_long_backfills(self) -> None:
         years = list(range(2018, 2026))
         self.assertGreaterEqual(_download_limit_for_range("10-Q", years), 36)
@@ -85,6 +102,21 @@ class _FakeDownloader:
     def get(self, filing_type: str, ticker: str, **kwargs) -> int:
         self.calls.append((filing_type, ticker, kwargs))
         return 0
+
+
+def test_make_downloader_uses_the_runtime_validated_identity(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    def fake_library_downloader(*args):
+        calls.append(args)
+        return object()
+
+    monkeypatch.setenv("SEC_USER_AGENT", "CorpCheck owner@corpcheck.org")
+    monkeypatch.setattr(sec_downloader, "Downloader", fake_library_downloader)
+
+    sec_downloader._make_downloader(str(tmp_path))
+
+    assert calls == [("CorpCheck", "owner@corpcheck.org", str(tmp_path))]
 
 
 def _write_submission(

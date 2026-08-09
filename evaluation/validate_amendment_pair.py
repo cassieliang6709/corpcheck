@@ -27,7 +27,10 @@ from corpcheck.ingestion.config import (
     SEC_DOWNLOAD_DIR,
     SEC_USER_AGENT,
 )
-from corpcheck.ingestion.downloaders.sec_downloader import SECDownloader
+from corpcheck.ingestion.downloaders.sec_downloader import (
+    SECDownloader,
+    parse_sec_user_agent,
+)
 from corpcheck.ingestion.loaders.db_loader import DBLoader
 from corpcheck.ingestion.pipeline import _process_filings
 from corpcheck.ingestion.processors.embedder import Embedder
@@ -95,10 +98,13 @@ def validate_isolation(
     ):
         raise ValidationError("refusing the default data/sec_filings download directory")
 
+    try:
+        _, contact_email = parse_sec_user_agent(sec_user_agent)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
     normalized_agent = " ".join(sec_user_agent.split()).lower()
     if (
-        not normalized_agent
-        or "@" not in normalized_agent
+        "@" not in contact_email
         or any(marker in normalized_agent for marker in PLACEHOLDER_USER_AGENT_MARKERS)
     ):
         raise ValidationError("SEC_USER_AGENT must contain a real, non-placeholder contact email")
@@ -220,6 +226,32 @@ def assert_clean_benchmark(snapshot: BenchmarkSnapshot) -> None:
         raise ValidationError(
             "public benchmark is already contaminated with GME or amendment filings: "
             f"{snapshot}"
+        )
+
+
+def assert_pristine_target(database_url: str) -> None:
+    """Reject a target containing any user-created relation before schema init."""
+    with psycopg2.connect(database_url) as conn:
+        conn.set_session(readonly=True)
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT n.nspname, c.relname, c.relkind
+                FROM pg_catalog.pg_class AS c
+                JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+                WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+                  AND n.nspname NOT LIKE 'pg_toast%'
+                  AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+                ORDER BY n.nspname, c.relname
+                LIMIT 10
+                """
+            )
+            relations = list(cursor.fetchall())
+    if relations:
+        names = [f"{schema}.{name}" for schema, name, _ in relations]
+        raise ValidationError(
+            "isolated target must be a pristine database before schema init; "
+            f"found relations: {names}"
         )
 
 
@@ -358,6 +390,7 @@ def import_and_validate(
     """Import into the isolated DB, assert composition, and prove benchmark stability."""
     before = benchmark_snapshot(benchmark_database_url)
     assert_clean_benchmark(before)
+    assert_pristine_target(database_url)
     with DBLoader(dsn=database_url) as loader:
         loader.init_schema(str(SCHEMA_PATH))
         assert_empty_target(database_url)

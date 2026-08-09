@@ -8,7 +8,7 @@ from evaluation import validate_amendment_pair as runner
 
 TARGET_URL = "postgresql://postgres:postgres@localhost:5432/gme_amendment_validation"
 BENCHMARK_URL = "postgresql://postgres:postgres@localhost:5432/financial_rag"
-REAL_USER_AGENT = "CorpCheck Validation research@example.org"
+REAL_USER_AGENT = "CorpCheck research@corpcheck.org"
 
 
 def fixture() -> dict:
@@ -59,6 +59,13 @@ def test_cli_requires_explicit_target_database_and_download_directory() -> None:
             "postgresql://localhost/not_the_benchmark",
             "must point",
         ),
+        (
+            TARGET_URL,
+            "/tmp/gme",
+            "CorpCheck Validation research@corpcheck.org",
+            BENCHMARK_URL,
+            "exactly",
+        ),
     ],
 )
 def test_isolation_guards_fail_closed(target, download_dir, user_agent, benchmark, message) -> None:
@@ -78,6 +85,40 @@ def test_isolation_accepts_distinct_db_temp_dir_and_real_user_agent(tmp_path) ->
         REAL_USER_AGENT,
         benchmark_database_url=BENCHMARK_URL,
     )
+
+
+def test_pristine_target_inspects_catalog_and_rejects_existing_relations(monkeypatch) -> None:
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql):
+            assert "pg_catalog.pg_class" in sql
+            assert "pg_catalog.pg_namespace" in sql
+
+        def fetchall(self):
+            return [("public", "filings", "r")]
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def set_session(self, *, readonly):
+            assert readonly is True
+
+        def cursor(self):
+            return FakeCursor()
+
+    monkeypatch.setattr(runner.psycopg2, "connect", lambda url: FakeConnection())
+
+    with pytest.raises(runner.ValidationError, match="pristine database"):
+        runner.assert_pristine_target(TARGET_URL)
 
 
 def test_fixture_contract_rejects_non_distinct_accessions(tmp_path) -> None:
@@ -219,6 +260,9 @@ def test_import_path_initializes_only_target_and_checks_benchmark_stability(monk
             events.append(("schema", path))
 
     monkeypatch.setattr(runner, "benchmark_snapshot", lambda url: snapshot)
+    monkeypatch.setattr(
+        runner, "assert_pristine_target", lambda url: events.append(("pristine", url))
+    )
     monkeypatch.setattr(runner, "DBLoader", FakeLoader)
     monkeypatch.setattr(
         runner, "assert_empty_target", lambda url: events.append(("empty", url))
@@ -245,6 +289,7 @@ def test_import_path_initializes_only_target_and_checks_benchmark_stability(monk
     )
 
     assert loaded == 12
+    assert events.index(("pristine", TARGET_URL)) < events.index(("loader", TARGET_URL))
     assert ("loader", TARGET_URL) in events
     assert ("empty", TARGET_URL) in events
     assert ("sql", TARGET_URL) in events
@@ -270,6 +315,7 @@ def test_import_fails_if_public_benchmark_snapshot_changes(monkeypatch) -> None:
             pass
 
     monkeypatch.setattr(runner, "benchmark_snapshot", lambda url: next(snapshots))
+    monkeypatch.setattr(runner, "assert_pristine_target", lambda url: None)
     monkeypatch.setattr(runner, "DBLoader", FakeLoader)
     monkeypatch.setattr(runner, "assert_empty_target", lambda url: None)
     monkeypatch.setattr(runner, "Embedder", lambda batch_size: object())
@@ -299,3 +345,32 @@ def test_import_rejects_an_already_contaminated_public_snapshot(monkeypatch) -> 
             fixture(),
             batch_size=2,
         )
+
+
+def test_import_rejects_populated_target_before_constructing_loader(monkeypatch) -> None:
+    snapshot = runner.BenchmarkSnapshot(50, 1662, 469874, 0, 0)
+    loader_constructed = False
+
+    class ForbiddenLoader:
+        def __init__(self, dsn):
+            nonlocal loader_constructed
+            loader_constructed = True
+
+    monkeypatch.setattr(runner, "benchmark_snapshot", lambda url: snapshot)
+    monkeypatch.setattr(
+        runner,
+        "assert_pristine_target",
+        lambda url: (_ for _ in ()).throw(runner.ValidationError("not pristine")),
+    )
+    monkeypatch.setattr(runner, "DBLoader", ForbiddenLoader)
+
+    with pytest.raises(runner.ValidationError, match="not pristine"):
+        runner.import_and_validate(
+            TARGET_URL,
+            BENCHMARK_URL,
+            [],
+            fixture(),
+            batch_size=2,
+        )
+
+    assert loader_constructed is False

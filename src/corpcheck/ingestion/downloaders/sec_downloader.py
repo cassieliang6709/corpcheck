@@ -54,12 +54,24 @@ FilingMeta = tuple[
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def parse_sec_user_agent(user_agent: str) -> tuple[str, str]:
+    """Parse the required ``ProjectName email@example.com`` SEC identity."""
+    parts = user_agent.split()
+    if len(parts) != 2:
+        raise ValueError("SEC_USER_AGENT must be exactly 'ProjectName email@example.com'")
+    project_name, email = parts
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", project_name):
+        raise ValueError("SEC_USER_AGENT project name must be one token")
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise ValueError("SEC_USER_AGENT must contain a valid contact email")
+    return project_name, email
+
+
 def _make_downloader(download_dir: str) -> Downloader:
     """Create an EDGAR Downloader pointed at *download_dir*."""
-    # sec-edgar-downloader >= 0.5 accepts a company name + email for user-agent
-    parts = SEC_USER_AGENT.split()
-    company = parts[0] if parts else "financial-rag"
-    email = parts[1] if len(parts) > 1 else "user@example.com"
+    # Read the environment at construction time so callers validate and use
+    # the same identity even when the module was imported earlier.
+    company, email = parse_sec_user_agent(os.getenv("SEC_USER_AGENT", SEC_USER_AGENT))
     return Downloader(company, email, download_dir)
 
 
