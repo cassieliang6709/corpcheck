@@ -90,6 +90,10 @@ COMPANY_SCOPE_ENABLED: bool = _env_bool("COMPANY_SCOPE_ENABLED", True)
 # toggle so the IR suite can measure what the filter costs in recall.
 REVISION_FILTER_ENABLED: bool = _env_bool("REVISION_FILTER_ENABLED", True)
 
+# Experimental dense retrieval over table-row children. Disabled by default:
+# the child index is evaluation-only and may not exist in production databases.
+TABLE_CHILD_RETRIEVAL_ENABLED: bool = _env_bool("TABLE_CHILD_RETRIEVAL_ENABLED", False)
+
 # Hybrid search fusion strategy: "rrf" (Reciprocal Rank Fusion) or "minmax"
 FUSION_STRATEGY: str = os.getenv("FUSION_STRATEGY", "rrf").lower()
 RRF_K: int = _env_int("RRF_K", 60)

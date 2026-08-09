@@ -1,4 +1,33 @@
-# Next retrieval experiment: table-row child retrieval
+# Table-row child retrieval experiment
+
+## Outcome: rejected as a default retrieval arm
+
+The experiment was implemented and run on 2026-08-09 against an index of
+29,570 benchmark-scoped table parents and 130,084 row children. The feature flag
+remains disabled by default because it failed the predeclared strict-quality and
+latency gates.
+
+| metric | off | on | acceptance |
+| --- | ---: | ---: | --- |
+| strict 0.5 clean gated Recall@10 | 0.1429 | 0.1429 | >= 0.2500 |
+| loose 0.2 clean gated Recall@10 | 0.4714 | 0.5143 | >= 0.4714 |
+| zero-in-scope-evidence queries | 4/35 | 4/35 | <= 4/35 |
+| median latency | 169 ms | 1,351 ms | diagnostic |
+| p95 latency | 461 ms | 2,374 ms | <= 692 ms |
+
+No strict miss became a hit. At the loose threshold, questions `00724` and
+`06247` became hits with no corresponding losses. That is evidence that the row
+representation can surface useful parents, but not enough evidence to justify a
+5.15x p95 latency or to claim improvement under the project's primary protocol.
+
+Run artifacts:
+
+- `evaluation/runs/R5_table_child_off_postcode/`
+- `evaluation/runs/R5_table_child_on/`
+
+Decision: keep the evaluation indexer, representation parser, and default-off
+flag for reproducibility. Do not enable the arm in production. Per the stop rule
+below, revisit table parsing/header inheritance before tuning fusion weights.
 
 ## Decision
 

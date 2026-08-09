@@ -34,6 +34,7 @@ from corpcheck.retrieval.search import (
     bm25_search,
     build_filter_clause,
     embed_query,
+    table_child_vector_search,
     vector_search,
 )
 from corpcheck.settings import (
@@ -41,6 +42,7 @@ from corpcheck.settings import (
     FUSION_STRATEGY,
     REVISION_FILTER_ENABLED,
     RRF_K,
+    TABLE_CHILD_RETRIEVAL_ENABLED,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,7 +85,7 @@ async def retrieve(
         filter_where, filter_params = build_filter_clause(
             sector, resolved_company or company_filter, effective_filing_type, fiscal_year
         )
-        return await asyncio.gather(
+        searches = [
             vector_search(
                 pool,
                 query_vec,
@@ -104,14 +106,41 @@ async def retrieve(
                 boost_filing_type,
                 boost_years,
             ),
-        )
+        ]
+        if TABLE_CHILD_RETRIEVAL_ENABLED and needs_quant:
+            searches.append(
+                table_child_vector_search(
+                    pool,
+                    query_vec,
+                    filter_where,
+                    filter_params,
+                    boost_ticker,
+                    boost_filing_type,
+                    boost_years,
+                )
+            )
+        return await asyncio.gather(*searches)
 
-    vec_rows, bm25_rows = await _candidates(scope_company)
-    if scope_company and not vec_rows and not bm25_rows:
+    candidate_arms = await _candidates(scope_company)
+    vec_rows, bm25_rows = candidate_arms[:2]
+    child_rows = candidate_arms[2] if len(candidate_arms) == 3 else []
+    if scope_company and not vec_rows and not bm25_rows and not child_rows:
         # The detection was wrong, or the issuer has no chunks. Degrade to the
         # whole corpus rather than returning nothing.
         logger.info("Company scope %s yielded no candidates; retrying unscoped", scope_company)
-        vec_rows, bm25_rows = await _candidates(None)
+        candidate_arms = await _candidates(None)
+        vec_rows, bm25_rows = candidate_arms[:2]
+        child_rows = candidate_arms[2] if len(candidate_arms) == 3 else []
+
+    if child_rows:
+        dense_by_id = {row["chunk_id"]: row for row in vec_rows}
+        for row in child_rows:
+            current = dense_by_id.get(row["chunk_id"])
+            if current is None or float(row["score_v"]) > float(current["score_v"]):
+                dense_by_id[row["chunk_id"]] = row
+        vec_rows = sorted(
+            dense_by_id.values(), key=lambda row: float(row["score_v"]), reverse=True
+        )[:overfetch]
 
     # Supersession is resolved here — after candidate generation, before fusion.
     # Filtering the candidate pool (rather than the final top-k) lets surviving

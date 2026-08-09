@@ -82,7 +82,8 @@ def build_boost_expression(
         idx += 1
     if boost_years:
         parts.append(
-            f"CASE WHEN fiscal_year::text = ANY(${idx}::text[]) THEN {FISCAL_YEAR_BOOST}::float ELSE 1.0 END"
+            "CASE WHEN fiscal_year::text = "
+            f"ANY(${idx}::text[]) THEN {FISCAL_YEAR_BOOST}::float ELSE 1.0 END"
         )
         values.append(boost_years)
         idx += 1
@@ -166,6 +167,83 @@ async def vector_search(
     sql, filter_vals, _ = apply_filter(sql, filter_where, filter_params, next_idx=3)
     async with pool.acquire() as conn:
         rows = await conn.fetch(sql, query_vec, limit, *filter_vals, *boost_vals)
+    return [dict(r) for r in rows]
+
+
+async def table_child_vector_search(
+    pool: asyncpg.Pool,
+    query_vec: list[float],
+    filter_where: str,
+    filter_params: dict,
+    boost_ticker: Optional[str] = None,
+    boost_filing_type: Optional[str] = None,
+    boost_years: Optional[list[str]] = None,
+) -> list[dict]:
+    """Retrieve SEC parent chunks through their best matching table-row child.
+
+    The experimental table is intentionally optional. A production database
+    without it keeps serving the standard dense and sparse arms.
+    """
+    limit = 30
+    boost_expr, boost_vals, _ = build_boost_expression(
+        boost_ticker, boost_filing_type, boost_years or [], start_idx=3 + len(filter_params)
+    )
+    sql = f"""
+        WITH child_scores AS (
+            SELECT
+                parent.chunk_id,
+                parent.ticker                                      AS company,
+                parent.sector,
+                parent.filing_type,
+                parent.event_date                                  AS filed_date,
+                parent.source_url,
+                parent.content                                     AS text,
+                parent.company_name,
+                parent.fiscal_year,
+                parent.period_label,
+                parent.section_name,
+                parent.source_type,
+                parent.content_kind,
+                parent.chunk_strategy,
+                parent.display_title,
+                parent.data_signal_score,
+                parent.is_quantitative,
+                child.child_index,
+                (1 - (child.embedding <=> $1::vector))             AS cos_sim,
+                (1 - (child.embedding <=> $1::vector)) * {boost_expr} AS score_v
+            FROM eval_table_child_chunks AS child
+            JOIN v_retrieval_chunks AS parent
+              ON parent.chunk_id = child.parent_chunk_id::text
+             AND parent.source_type = 'sec'
+            WHERE child.embedding IS NOT NULL
+            __FILTER__
+            ORDER BY score_v DESC
+            LIMIT $2
+        ), ranked AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER (
+                    PARTITION BY chunk_id
+                    ORDER BY score_v DESC, child_index
+                ) AS parent_rank
+            FROM child_scores
+        )
+        SELECT *
+        FROM ranked
+        WHERE parent_rank = 1
+        ORDER BY score_v DESC
+        LIMIT $2
+    """
+    sql, filter_vals, _ = apply_filter(sql, filter_where, filter_params, next_idx=3)
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(sql, query_vec, limit, *filter_vals, *boost_vals)
+    except asyncpg.UndefinedTableError:
+        logger.warning(
+            "Table-child retrieval is enabled but eval_table_child_chunks is missing; "
+            "continuing without the experimental arm"
+        )
+        return []
     return [dict(r) for r in rows]
 
 
