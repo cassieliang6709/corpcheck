@@ -443,6 +443,19 @@ tuning.
    report match the frozen manifest. Invalid collisions and partial recovery
    leave the final report unwritten.
 
+   The post-recovery safety layer is also in place, but has not mutated a
+   corpus. It verifies the exact manifest/report/raw-file set, compares full
+   company and filing identities on same-server old/new databases, converts one
+   verified submission into complete offline cleaner/chunker/embedder rows, and
+   replaces one filing's chunks in a single transaction. A hash-chained,
+   fsynced checkpoint binds the database names, raw and processing-source
+   digests, embedding configuration, and exact accession set. The current clone
+   passed the read-only preflight at 50 companies and 1,662 filings with matching
+   identity SHA-256
+   `4e189bd5b4376985b785338feef6d05c9d9ea461d7c63077e68fcc6ae4ae2aae`.
+   Final orchestration and live reprocessing remain pending the complete raw
+   recovery report.
+
    ```bash
    .venv/bin/python -m evaluation.paired_retrieval_gate \
      --gate-profile development \

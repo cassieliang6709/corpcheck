@@ -63,10 +63,13 @@ def spec() -> recovery.FilingSpec:
     return recovery.FilingSpec(
         ticker="AAPL",
         form="10-K",
+        fiscal_year=2023,
+        period="annual",
         filed_date="2023-11-03",
         period_of_report="2023-09-30",
         accession=ACCESSION,
         cik=CIK,
+        source_url="https://www.sec.gov/Archives/example-index.htm",
         full_submission_url=(
             "https://www.sec.gov/Archives/edgar/data/320193/"
             "000032019323000106/0000320193-23-000106.txt"

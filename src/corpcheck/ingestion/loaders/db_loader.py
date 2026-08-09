@@ -28,11 +28,55 @@ import psycopg2
 import psycopg2.extras
 from pgvector.psycopg2 import register_vector
 
-from corpcheck.ingestion.config import DATABASE_URL, DB_BATCH_SIZE
+from corpcheck.ingestion.config import DATABASE_URL, DB_BATCH_SIZE, EMBEDDING_DIM
 
 logger = logging.getLogger(__name__)
 
 Row = dict[str, Any]
+
+
+_CHUNK_UPSERT_SQL = """
+    INSERT INTO chunks (
+        filing_id, ticker, sector, filing_type, fiscal_year, period,
+        filed_date, section_name, chunk_index, content, char_count,
+        token_count, numeric_token_count, number_density,
+        data_signal_score, is_quantitative, content_kind,
+        chunk_strategy, display_title, chunk_group_key,
+        structure_meta, embedding, source_url
+    )
+    VALUES (
+        %(filing_id)s, %(ticker)s, %(sector)s, %(filing_type)s,
+        %(fiscal_year)s, %(period)s,
+        COALESCE(%(filed_date)s, (SELECT filed_date FROM filings WHERE id = %(filing_id)s)),
+        %(section_name)s, %(chunk_index)s, %(content)s, %(char_count)s,
+        %(token_count)s, %(numeric_token_count)s, %(number_density)s,
+        %(data_signal_score)s, %(is_quantitative)s, %(content_kind)s,
+        %(chunk_strategy)s, %(display_title)s, %(chunk_group_key)s,
+        %(structure_meta)s, %(embedding)s, %(source_url)s
+    )
+    ON CONFLICT (filing_id, chunk_index) DO UPDATE SET
+        ticker      = EXCLUDED.ticker,
+        sector      = EXCLUDED.sector,
+        filing_type = EXCLUDED.filing_type,
+        fiscal_year = EXCLUDED.fiscal_year,
+        period      = EXCLUDED.period,
+        filed_date  = EXCLUDED.filed_date,
+        section_name = EXCLUDED.section_name,
+        content     = EXCLUDED.content,
+        char_count  = EXCLUDED.char_count,
+        token_count = EXCLUDED.token_count,
+        numeric_token_count = EXCLUDED.numeric_token_count,
+        number_density = EXCLUDED.number_density,
+        data_signal_score = EXCLUDED.data_signal_score,
+        is_quantitative = EXCLUDED.is_quantitative,
+        content_kind = EXCLUDED.content_kind,
+        chunk_strategy = EXCLUDED.chunk_strategy,
+        display_title = EXCLUDED.display_title,
+        chunk_group_key = EXCLUDED.chunk_group_key,
+        structure_meta = EXCLUDED.structure_meta,
+        embedding   = EXCLUDED.embedding,
+        source_url  = EXCLUDED.source_url
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -313,48 +357,6 @@ class DBLoader:
 
         The ``content_tsv`` column is populated automatically by a DB trigger.
         """
-        sql = """
-            INSERT INTO chunks (
-                filing_id, ticker, sector, filing_type, fiscal_year, period,
-                filed_date, section_name, chunk_index, content, char_count,
-                token_count, numeric_token_count, number_density,
-                data_signal_score, is_quantitative, content_kind,
-                chunk_strategy, display_title, chunk_group_key,
-                structure_meta, embedding, source_url
-            )
-            VALUES (
-                %(filing_id)s, %(ticker)s, %(sector)s, %(filing_type)s,
-                %(fiscal_year)s, %(period)s,
-                COALESCE(%(filed_date)s, (SELECT filed_date FROM filings WHERE id = %(filing_id)s)),
-                %(section_name)s, %(chunk_index)s, %(content)s, %(char_count)s,
-                %(token_count)s, %(numeric_token_count)s, %(number_density)s,
-                %(data_signal_score)s, %(is_quantitative)s, %(content_kind)s,
-                %(chunk_strategy)s, %(display_title)s, %(chunk_group_key)s,
-                %(structure_meta)s, %(embedding)s, %(source_url)s
-            )
-            ON CONFLICT (filing_id, chunk_index) DO UPDATE SET
-                ticker      = EXCLUDED.ticker,
-                sector      = EXCLUDED.sector,
-                filing_type = EXCLUDED.filing_type,
-                fiscal_year = EXCLUDED.fiscal_year,
-                period      = EXCLUDED.period,
-                filed_date  = EXCLUDED.filed_date,
-                section_name = EXCLUDED.section_name,
-                content     = EXCLUDED.content,
-                char_count  = EXCLUDED.char_count,
-                token_count = EXCLUDED.token_count,
-                numeric_token_count = EXCLUDED.numeric_token_count,
-                number_density = EXCLUDED.number_density,
-                data_signal_score = EXCLUDED.data_signal_score,
-                is_quantitative = EXCLUDED.is_quantitative,
-                content_kind = EXCLUDED.content_kind,
-                chunk_strategy = EXCLUDED.chunk_strategy,
-                display_title = EXCLUDED.display_title,
-                chunk_group_key = EXCLUDED.chunk_group_key,
-                structure_meta = EXCLUDED.structure_meta,
-                embedding   = EXCLUDED.embedding,
-                source_url  = EXCLUDED.source_url
-        """
         # Ensure embeddings are numpy arrays
         normalised_rows = []
         for row in rows:
@@ -379,9 +381,109 @@ class DBLoader:
                     r["embedding"] = r["embedding"].astype(np.float32)
             normalised_rows.append(r)
 
-        n = self._execute_batch(sql, normalised_rows)
+        n = self._execute_batch(_CHUNK_UPSERT_SQL, normalised_rows)
         logger.info("Loaded %d chunks", n)
         return n
+
+    def replace_filing_chunks_atomic(self, filing_id: int, rows: Sequence[Row]) -> int:
+        """Replace one filing's complete chunk set in a single transaction."""
+        normalised_rows = self._validate_replacement_chunks(filing_id, rows)
+        keep_chunk_indexes = [row["chunk_index"] for row in normalised_rows]
+
+        cur = self.conn.cursor()
+        try:
+            psycopg2.extras.execute_batch(
+                cur,
+                _CHUNK_UPSERT_SQL,
+                normalised_rows,
+                page_size=self.batch_size,
+            )
+            cur.execute(
+                """
+                DELETE FROM chunks
+                WHERE filing_id = %s
+                  AND NOT (chunk_index = ANY(%s))
+                """,
+                (filing_id, keep_chunk_indexes),
+            )
+            deleted = cur.rowcount
+            self.conn.commit()
+        except Exception as exc:
+            self.conn.rollback()
+            logger.error(
+                "Atomic chunk replacement failed for filing_id=%s: %s",
+                filing_id,
+                exc,
+            )
+            raise
+        finally:
+            cur.close()
+
+        logger.info(
+            "Atomically replaced %d chunks and pruned %d stale chunks for filing_id=%s",
+            len(normalised_rows),
+            deleted,
+            filing_id,
+        )
+        return len(normalised_rows)
+
+    @staticmethod
+    def _validate_replacement_chunks(filing_id: int, rows: Sequence[Row]) -> list[Row]:
+        if (
+            isinstance(filing_id, bool)
+            or not isinstance(filing_id, int)
+            or filing_id <= 0
+        ):
+            raise ValueError("Atomic chunk replacement requires a positive filing_id")
+        if not rows:
+            raise ValueError("Atomic chunk replacement requires at least one row")
+
+        chunk_indexes: list[int] = []
+        normalised_rows: list[Row] = []
+        for position, row in enumerate(rows):
+            if row.get("filing_id") != filing_id:
+                raise ValueError(
+                    f"Row {position} filing_id must match replacement filing_id={filing_id}"
+                )
+
+            chunk_index = row.get("chunk_index")
+            if not isinstance(chunk_index, int) or isinstance(chunk_index, bool):
+                raise ValueError(f"Row {position} chunk_index must be an integer")
+            chunk_indexes.append(chunk_index)
+
+            embedding = row.get("embedding")
+            if embedding is None:
+                raise ValueError(f"Row {position} embedding is required")
+            embedding_array = np.asarray(embedding)
+            if embedding_array.shape != (EMBEDDING_DIM,):
+                raise ValueError(
+                    f"Row {position} embedding must have exactly {EMBEDDING_DIM} dimensions"
+                )
+
+            normalised_row = dict(row)
+            normalised_row["embedding"] = embedding_array.astype(np.float32)
+            normalised_row.setdefault("filed_date", None)
+            normalised_row.setdefault("numeric_token_count", 0)
+            normalised_row.setdefault("number_density", 0.0)
+            normalised_row.setdefault("data_signal_score", 0.0)
+            normalised_row.setdefault("is_quantitative", False)
+            normalised_row.setdefault("content_kind", "narrative")
+            normalised_row.setdefault("chunk_strategy", "sentence_pack")
+            normalised_row.setdefault("display_title", None)
+            normalised_row.setdefault("chunk_group_key", None)
+            normalised_row.setdefault("structure_meta", psycopg2.extras.Json({}))
+            if not isinstance(normalised_row["structure_meta"], psycopg2.extras.Json):
+                normalised_row["structure_meta"] = psycopg2.extras.Json(
+                    normalised_row["structure_meta"] or {}
+                )
+            normalised_rows.append(normalised_row)
+
+        if len(set(chunk_indexes)) != len(chunk_indexes):
+            raise ValueError("chunk_index values must be unique")
+        if sorted(chunk_indexes) != list(range(len(chunk_indexes))):
+            raise ValueError("chunk_index values must be contiguous from 0 to n-1")
+
+        return normalised_rows
 
     def prune_chunks_for_filing(
         self,

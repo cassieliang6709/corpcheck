@@ -74,10 +74,13 @@ class _HTTPStatusError(RuntimeError):
 class FilingSpec:
     ticker: str
     form: str
+    fiscal_year: int
+    period: str
     filed_date: str
     period_of_report: str
     accession: str
     cik: str
+    source_url: str
     full_submission_url: str
 
 
@@ -175,7 +178,7 @@ def _validate_filing(raw: Any) -> FilingSpec:
     fiscal_year = row["fiscal_year"]
     if isinstance(fiscal_year, bool) or not isinstance(fiscal_year, int):
         raise RecoveryError(f"{accession} has invalid fiscal_year")
-    _required_text(row, "period", accession)
+    period = _required_text(row, "period", accession)
     filed_date = _iso_date(row, "filed_date", accession)
     period_of_report = _iso_date(row, "period_of_report", accession)
 
@@ -189,10 +192,13 @@ def _validate_filing(raw: Any) -> FilingSpec:
     return FilingSpec(
         ticker=ticker,
         form=form,
+        fiscal_year=fiscal_year,
+        period=period,
         filed_date=filed_date,
         period_of_report=period_of_report,
         accession=accession,
         cik=cik,
+        source_url=source_url,
         full_submission_url=submission_url,
     )
 
