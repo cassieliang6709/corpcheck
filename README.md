@@ -407,7 +407,26 @@ tuning.
    AMZN FY2019 and Nike FY2018 accessions, requires a pristine target database,
    checks semantic table metadata and question-only strict overlap, and proves
    the benchmark database remains unchanged. Only if gold parents enter the
-   candidate pool but still miss top 10 will a generic reranker be added.
+   candidate pool but still miss top 10 will a generic reranker be added. Once
+   the isolated re-ingestion checks pass, compare the complete old and new
+   corpora with the paired, question-only runner rather than separate ad hoc
+   timings:
+
+   ```bash
+   .venv/bin/python -m evaluation.paired_retrieval_gate \
+     --gate-profile development \
+     --old-db-url "$CORPCHECK_OLD_DATABASE_URL" \
+     --new-db-url "$CORPCHECK_NEW_DATABASE_URL" \
+     --dataset evaluation/datasets/financebench_filtered.json \
+     --output evaluation/runs/R11_table_representation/dev_paired_gate.json
+   ```
+
+   The runner requires different databases with identical company and filing
+   identities, alternates old/new query order, and measures three rounds after
+   one untimed warm-up round. It fails closed unless every development round
+   reaches strict Recall@10 >= 0.2500 without regressing against the old corpus.
+   It also checks strict oracle reachability, zero-provenance queries, and paired
+   p95 latency.
 4. **Create a real held-out contract before tuning that arm.** The current 35
    questions have informed multiple designs and are development data, not proof
    of generalisation. An audit of the official 150-record open-source
@@ -436,6 +455,13 @@ tuning.
    curated 34-record gold and compare against the 1/34 baseline only after strict
    Recall@10 improves on development data without a held-out regression. Build a
    small demo only after answer correctness and citation support are credible.
+
+In execution order, the remaining path is: validate the AMZN/Nike representation
+in an isolated database; build matched old/new development corpora and run the
+paired development gate; ingest the frozen 45-document held-out corpus into the
+same two representations and evaluate it exactly once; validate CVS and
+GameStop in isolation; then rerun the 34-answer benchmark. Any failed gate stops
+that retrieval arm instead of triggering more held-out-specific tuning.
 
 ## Background and attribution
 
