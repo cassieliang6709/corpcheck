@@ -1,0 +1,10 @@
+[
+  {
+    "id": "financebench_id_00283",
+    "question": "How much does Pfizer expect to pay to spin off Upjohn in the future in USD million?",
+    "original_gold": 77.78,
+    "evidence_derived_value": 70,
+    "reason": "FinanceBench's 77.78 assumes $700 million is 90% of total cost, but the evidence says $700 million is the total expected cost and 90% has already been incurred; the evidence-derived remaining amount is about $70 million.",
+    "source": "FinanceBench"
+  }
+]

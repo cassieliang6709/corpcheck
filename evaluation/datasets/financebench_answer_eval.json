@@ -1,0 +1,503 @@
+[
+  {
+    "id": "financebench_id_08286",
+    "question": "By drawing conclusions from the information stated only in the income statement, what is Amazon's FY2019 net income attributable to shareholders (in USD millions)?",
+    "should_abstain": false,
+    "expected_values": [
+      11588,
+      "net income"
+    ],
+    "company": "AMZN",
+    "filing_type": "10-K",
+    "year": 2019,
+    "source": "FinanceBench",
+    "category": "extraction"
+  },
+  {
+    "id": "financebench_id_00222",
+    "question": "Does AMD have a reasonably healthy liquidity profile based on its quick ratio for FY22? If the quick ratio is not relevant to measure liquidity, please state that and explain why.",
+    "should_abstain": false,
+    "expected_values": [
+      1.57,
+      "quick ratio"
+    ],
+    "company": "AMD",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "mixed"
+  },
+  {
+    "id": "financebench_id_00995",
+    "question": "What are the major products and services that AMD sells as of FY22?",
+    "should_abstain": false,
+    "expected_values": [
+      "server microprocessors",
+      "DPUs",
+      "FPGAs",
+      "semi-custom SoC",
+      "development services",
+      "embedded CPUs"
+    ],
+    "company": "AMD",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "qualitative"
+  },
+  {
+    "id": "financebench_id_01198",
+    "question": "What drove revenue change as of the FY22 for AMD?",
+    "should_abstain": false,
+    "expected_values": [
+      "EPYC server processors",
+      "semi-custom product sales",
+      "Xilinx embedded product sales"
+    ],
+    "company": "AMD",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "qualitative"
+  },
+  {
+    "id": "financebench_id_00917",
+    "question": "What drove operating margin change as of the FY22 for AMD? If operating margin is not a useful metric for a company like this, then please state that and explain why.",
+    "should_abstain": false,
+    "expected_values": [
+      "amortization of intangible assets",
+      "Xilinx acquisition"
+    ],
+    "company": "AMD",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "qualitative"
+  },
+  {
+    "id": "financebench_id_01279",
+    "question": "Among operations, investing, and financing activities, which brought in the most (or lost the least) cash flow for AMD in FY22?",
+    "should_abstain": false,
+    "expected_values": [
+      "operating activities"
+    ],
+    "company": "AMD",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "calculation",
+    "accepted_answers": [
+      "Operations",
+      "Operating activities"
+    ]
+  },
+  {
+    "id": "financebench_id_00563",
+    "question": "From FY21 to FY22, excluding Embedded, in which AMD reporting segment did sales proportionally increase the most?",
+    "should_abstain": false,
+    "expected_values": [
+      "Data Center"
+    ],
+    "company": "AMD",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "calculation"
+  },
+  {
+    "id": "financebench_id_00757",
+    "question": "Did AMD report customer concentration in FY22?",
+    "should_abstain": false,
+    "expected_values": [
+      "one customer",
+      16,
+      "consolidated net revenue"
+    ],
+    "company": "AMD",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "extraction"
+  },
+  {
+    "id": "financebench_id_04209",
+    "question": "Using only the information within the balance sheet, how much total assets did Costco have at the end of FY2021? Answer in USD millions.",
+    "should_abstain": false,
+    "expected_values": [
+      59268,
+      "total assets"
+    ],
+    "company": "COST",
+    "filing_type": "10-K",
+    "year": 2021,
+    "source": "FinanceBench",
+    "category": "extraction"
+  },
+  {
+    "id": "financebench_id_05915",
+    "question": "What is the FY2018 fixed asset turnover ratio for CVS Health? Fixed asset turnover ratio is defined as: FY2018 revenue / (average PP&E between FY2017 and FY2018). Round your answer to two decimal places. Calculate what was asked by utilizing the line items clearly shown in the P&L statement and the balance sheet.",
+    "should_abstain": false,
+    "expected_values": [
+      17.98,
+      "fixed asset turnover"
+    ],
+    "company": "CVS",
+    "filing_type": "10-K",
+    "year": 2018,
+    "source": "FinanceBench",
+    "category": "calculation"
+  },
+  {
+    "id": "financebench_id_00790",
+    "question": "Is CVS Health a capital-intensive business based on FY2022 data?",
+    "should_abstain": false,
+    "expected_values": [
+      1.82,
+      "ROA",
+      5.6,
+      "goodwill"
+    ],
+    "company": "CVS",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "mixed"
+  },
+  {
+    "id": "financebench_id_01107",
+    "question": "Has CVS Health reported any materially important ongoing legal battles from 2022, 2021 and 2020?",
+    "should_abstain": false,
+    "expected_values": [
+      "usual and customary pricing",
+      "PBM",
+      "opioid",
+      4.3,
+      625
+    ],
+    "company": "CVS",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "qualitative"
+  },
+  {
+    "id": "financebench_id_01244",
+    "question": "Has CVS Health paid dividends to common shareholders in Q2 of FY2022?",
+    "should_abstain": false,
+    "expected_values": [
+      "paid",
+      0.55,
+      "per share"
+    ],
+    "company": "CVS",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "extraction"
+  },
+  {
+    "id": "financebench_id_00956",
+    "question": "Are JnJ's FY2022 financials that of a high growth company?",
+    "should_abstain": false,
+    "expected_values": [
+      "not a high growth company",
+      1.3
+    ],
+    "company": "JNJ",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "mixed"
+  },
+  {
+    "id": "financebench_id_00669",
+    "question": "What drove gross margin change as of FY2022 for JnJ? If gross margin is not a useful metric for a company like this, then please state that and explain why.",
+    "should_abstain": false,
+    "expected_values": [
+      "COVID-19 vaccine manufacturing exit",
+      "currency impacts in the Pharmaceutical segment",
+      "commodity inflation in the MedTech and Consumer Health segments",
+      "supply chain benefits in the Consumer Health segment",
+      "partially offset"
+    ],
+    "company": "JNJ",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "qualitative"
+  },
+  {
+    "id": "financebench_id_00711",
+    "question": "Roughly how many times has JnJ sold its inventory in FY2022? Calculate inventory turnover ratio for FY2022; if conventional inventory management is not meaningful for the company then state that and explain why.",
+    "should_abstain": false,
+    "expected_values": [
+      2.7,
+      "times"
+    ],
+    "company": "JNJ",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "calculation"
+  },
+  {
+    "id": "financebench_id_00299",
+    "question": "Which of JPM's business segments had the lowest net revenue in 2021 Q1?",
+    "should_abstain": false,
+    "expected_values": [
+      "Corporate",
+      -473,
+      "million"
+    ],
+    "company": "JPM",
+    "filing_type": "10-Q",
+    "year": 2021,
+    "source": "FinanceBench",
+    "category": "extraction"
+  },
+  {
+    "id": "financebench_id_02119",
+    "question": "If JPM went bankrupted by the end by 2021 Q1 and liquidated all of its assets to pay its shareholders, how much could each shareholder get?",
+    "should_abstain": false,
+    "expected_values": [
+      66.56,
+      "per share"
+    ],
+    "company": "JPM",
+    "filing_type": "10-Q",
+    "year": 2021,
+    "source": "FinanceBench",
+    "category": "calculation"
+  },
+  {
+    "id": "financebench_id_00206",
+    "question": "Are JPM's gross margins historically consistent (not fluctuating more than roughly 2% each year)? If gross margins are not a relevant metric for a company like this, then please state that and explain why.",
+    "should_abstain": false,
+    "expected_values": [
+      "financial institution",
+      "not a relevant metric"
+    ],
+    "company": "JPM",
+    "filing_type": "10-K",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "qualitative"
+  },
+  {
+    "id": "financebench_id_00394",
+    "question": "In 2022 Q2, which of JPM's business segments had the highest net income?",
+    "should_abstain": false,
+    "expected_values": [
+      "Corporate & Investment Bank",
+      3725,
+      "million"
+    ],
+    "company": "JPM",
+    "filing_type": "10-Q",
+    "year": 2022,
+    "source": "FinanceBench",
+    "category": "extraction"
+  },
+  {
+    "id": "financebench_id_02049",
+    "question": "Looking at VaR, did the risk that JPM faced in the second fiscal quarter of 2023 decrease compared to the same period in the prior year?",
+    "should_abstain": false,
+    "expected_values": [
+      "decreased",
+      7,
+      "million"
+    ],
+    "company": "JPM",
+    "filing_type": "10-Q",
+    "year": 2023,
+    "source": "FinanceBench",
+    "category": "calculation",
+    "accepted_answers": [
+      "Yes. It decreased."
+    ]
+  },
+  {
+    "id": "financebench_id_00552",
+    "question": "Has Microsoft increased its debt on balance sheet between FY2023 and the FY2022 period?",
+    "should_abstain": false,
+    "expected_values": [
+      "decreased",
+      2.5,
+      "billion"
+    ],
+    "company": "MSFT",
+    "filing_type": "10-K",
+    "year": 2023,
+    "source": "FinanceBench",
+    "category": "calculation"
+  },
+  {
+    "id": "financebench_id_04302",
+    "question": "We need to calculate a reasonable approximation (or exact number if possible) of a financial metric. Basing your judgment by information plainly provided in the statement of income, what is Nike's three year average of cost of goods sold as a % of revenue from FY2016 to FY2018? Answer in units of percents and round to one decimal place.",
+    "should_abstain": false,
+    "expected_values": [
+      55.1
+    ],
+    "company": "NKE",
+    "filing_type": "10-K",
+    "year": 2018,
+    "source": "FinanceBench",
+    "category": "calculation"
+  },
+  {
+    "id": "financebench_id_03531",
+    "question": "According to the details clearly outlined within the balance sheet, how much total current assets did Nike have at the end of FY2019? Answer in USD millions.",
+    "should_abstain": false,
+    "expected_values": [
+      16525,
+      "million"
+    ],
+    "company": "NKE",
+    "filing_type": "10-K",
+    "year": 2019,
+    "source": "FinanceBench",
+    "category": "extraction"
+  },
+  {
+    "id": "financebench_id_04080",
+    "question": "When primarily referencing the income statement and the statement of financial position, what is the FY2021 inventory turnover ratio for Nike? Inventory turnover ratio is defined as: (FY2021 COGS) / (average inventory between FY2020 and FY2021). Round your answer to two decimal places.",
+    "should_abstain": false,
+    "expected_values": [
+      3.46
+    ],
+    "company": "NKE",
+    "filing_type": "10-K",
+    "year": 2021,
+    "source": "FinanceBench",
+    "category": "calculation"
+  },
+  {
+    "id": "financebench_id_01163",
+    "question": "Among operations, investing, and financing activities, which brought in the most (or lost the least) cash flow for Nike in FY2023?",
+    "should_abstain": false,
+    "expected_values": [
+      "cash flow from operations"
+    ],
+    "company": "NKE",
+    "filing_type": "10-K",
+    "year": 2023,
+    "source": "FinanceBench",
+    "category": "calculation",
+    "accepted_answers": [
+      "Operating activities.",
+      "Cash flow from operations."
+    ]
+  },
+  {
+    "id": "financebench_id_00302",
+    "question": "Did Pfizer grow its PPNE between FY20 and FY21?",
+    "should_abstain": false,
+    "expected_values": [
+      14882,
+      13745
+    ],
+    "company": "PFE",
+    "filing_type": "10-K",
+    "year": 2021,
+    "source": "FinanceBench",
+    "category": "calculation",
+    "accepted_answers": [
+      "Yes. PP&E grew.",
+      "Yes, PP&E grew."
+    ]
+  },
+  {
+    "id": "financebench_id_00702",
+    "question": "Were there any potential events that are not in Pfizer's standard business operations that substantially increased net income in 2019?",
+    "should_abstain": false,
+    "expected_values": [
+      "gain",
+      "Consumer Healthcare JV transaction"
+    ],
+    "company": "PFE",
+    "filing_type": "10-K",
+    "year": 2021,
+    "source": "FinanceBench",
+    "category": "qualitative"
+  },
+  {
+    "id": "financebench_id_02416",
+    "question": "What are three main companies acquired by Pfizer mentioned in this 10K report?",
+    "should_abstain": false,
+    "expected_values": [
+      "Trillium",
+      "Array",
+      "Therachon"
+    ],
+    "company": "PFE",
+    "filing_type": "10-K",
+    "year": 2021,
+    "source": "FinanceBench",
+    "category": "extraction"
+  },
+  {
+    "id": "financebench_id_00724",
+    "question": "For Pfizer, which geographic region had the biggest drop in Q22023 year over year revenues (on a percentage basis)?",
+    "should_abstain": false,
+    "expected_values": [
+      "Developed Rest of World"
+    ],
+    "company": "PFE",
+    "filing_type": "10-Q",
+    "year": 2023,
+    "source": "FinanceBench",
+    "category": "calculation"
+  },
+  {
+    "id": "financebench_id_02419",
+    "question": "As of Q2'2023, is Pfizer spinning off any large business segments?",
+    "should_abstain": false,
+    "expected_values": [
+      "Upjohn"
+    ],
+    "company": "PFE",
+    "filing_type": "10-Q",
+    "year": 2023,
+    "source": "FinanceBench",
+    "category": "qualitative"
+  },
+  {
+    "id": "financebench_id_06247",
+    "question": "What is FY2018 days payable outstanding (DPO) for Walmart? DPO is defined as: 365 * (average accounts payable between FY2017 and FY2018) / (FY2018 COGS + change in inventory between FY2017 and FY2018). Round your answer to two decimal places. Please base your judgments on the information provided primarily in the statement of financial position and the P&L statement.",
+    "should_abstain": false,
+    "expected_values": [
+      42.69
+    ],
+    "company": "WMT",
+    "filing_type": "10-K",
+    "year": 2018,
+    "source": "FinanceBench",
+    "category": "calculation"
+  },
+  {
+    "id": "financebench_id_04784",
+    "question": "Based on the information provided primarily in the statement of income, what is the FY2018 - FY2019 change in unadjusted operating income % margin for Walmart? Answer in units of percents and round to one decimal place.",
+    "should_abstain": false,
+    "expected_values": [
+      0.2
+    ],
+    "company": "WMT",
+    "filing_type": "10-K",
+    "year": 2019,
+    "source": "FinanceBench",
+    "category": "calculation"
+  },
+  {
+    "id": "financebench_id_06741",
+    "question": "What is the FY2018 - FY2020 3 year average unadjusted EBITDA % margin for Walmart? Define unadjusted EBITDA as unadjusted operating income + depreciation and amortization from the cash flow statement. Answer in units of percents and round to one decimal place. Calculate what was asked by utilizing the line items clearly shown in the P&L statement and the cash flow statement.",
+    "should_abstain": false,
+    "expected_values": [
+      6.2
+    ],
+    "company": "WMT",
+    "filing_type": "10-K",
+    "year": 2020,
+    "source": "FinanceBench",
+    "category": "calculation"
+  }
+]
