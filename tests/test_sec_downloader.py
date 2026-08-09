@@ -1,10 +1,14 @@
 import datetime as dt
 import unittest
+from pathlib import Path
 
+from corpcheck.ingestion.downloaders import sec_downloader
 from corpcheck.ingestion.downloaders.sec_downloader import (
+    SECDownloader,
     _download_limit_for_range,
     _infer_fiscal_year,
     _infer_period,
+    _parse_submission_metadata,
 )
 
 
@@ -72,6 +76,79 @@ class SECDownloaderLimitTests(unittest.TestCase):
     def test_malformed_fiscal_year_end_falls_back_to_calendar_quarters(self) -> None:
         self.assertEqual(_infer_period("10-Q", dt.date(2024, 6, 30), "9999"), "Q2")
         self.assertEqual(_infer_period("10-Q", dt.date(2024, 6, 30), None), "Q2")
+
+
+class _FakeDownloader:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict]] = []
+
+    def get(self, filing_type: str, ticker: str, **kwargs) -> int:
+        self.calls.append((filing_type, ticker, kwargs))
+        return 0
+
+
+def _write_submission(
+    download_dir: Path,
+    accession: str,
+    filing_type: str,
+) -> Path:
+    accession_dir = (
+        download_dir / "sec-edgar-filings" / "TEST" / "10-K" / accession
+    )
+    accession_dir.mkdir(parents=True)
+    submission = accession_dir / "full-submission.txt"
+    submission.write_text(
+        "\n".join(
+            (
+                f"CONFORMED SUBMISSION TYPE: {filing_type}",
+                "CENTRAL INDEX KEY: 0000123456",
+                "FILED AS OF DATE: 20240315",
+                "CONFORMED PERIOD OF REPORT: 20230101",
+                "FISCAL YEAR END: 0101",
+            )
+        ),
+        encoding="utf-8",
+    )
+    return submission
+
+
+def test_download_can_explicitly_include_amendments(monkeypatch, tmp_path) -> None:
+    fake = _FakeDownloader()
+    monkeypatch.setattr(sec_downloader, "_make_downloader", lambda _: fake)
+    downloader = SECDownloader(download_dir=str(tmp_path))
+
+    downloader.download(["TEST"], ["10-K"], [2022], include_amends=True)
+
+    assert len(fake.calls) == 1
+    filing_type, ticker, kwargs = fake.calls[0]
+    assert (filing_type, ticker) == ("10-K", "TEST")
+    assert kwargs["include_amends"] is True
+
+
+def test_default_download_still_excludes_amendments(monkeypatch, tmp_path) -> None:
+    fake = _FakeDownloader()
+    monkeypatch.setattr(sec_downloader, "_make_downloader", lambda _: fake)
+    downloader = SECDownloader(download_dir=str(tmp_path))
+
+    downloader.download(["TEST"], ["10-K"], [2022])
+
+    assert fake.calls[0][2]["include_amends"] is False
+
+
+def test_submission_header_preserves_original_and_amended_filing_types(tmp_path) -> None:
+    original = _write_submission(tmp_path, "0000123456-24-000001", "10-K")
+    amended = _write_submission(tmp_path, "0000123456-24-000002", "10-K/A")
+    downloader = object.__new__(SECDownloader)
+    downloader.download_dir = str(tmp_path)
+
+    assert _parse_submission_metadata(original.parent)["filing_type"] == "10-K"
+    assert _parse_submission_metadata(amended.parent)["filing_type"] == "10-K/A"
+
+    metadata = downloader._collect_metadata(["TEST"], ["10-K"], [2022])
+    by_accession = {row[8]: row for row in metadata}
+
+    assert by_accession["0000123456-24-000001"][1:4] == ("10-K", 2022, "annual")
+    assert by_accession["0000123456-24-000002"][1:4] == ("10-K/A", 2022, "annual")
 
 
 if __name__ == "__main__":

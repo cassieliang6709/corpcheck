@@ -141,6 +141,7 @@ def _parse_submission_metadata(accession_dir: Path) -> dict[str, str]:
     header = text[:8000]
     patterns = {
         "cik": r"CENTRAL INDEX KEY:\s+([0-9]+)",
+        "filing_type": r"CONFORMED SUBMISSION TYPE:\s+([^\r\n]+)",
         "filed_date": r"FILED AS OF DATE:\s+(\d{8})",
         "period_of_report": r"CONFORMED PERIOD OF REPORT:\s+(\d{8})",
         "fiscal_year_end": r"FISCAL YEAR END:\s+(\d{4})",
@@ -169,6 +170,12 @@ def _parse_mmdd(raw: str | None) -> tuple[int, int] | None:
     if not 1 <= month <= 12 or not 1 <= day <= 31:
         return None
     return month, day
+
+
+def _base_filing_type(filing_type: str) -> str:
+    """Return the base SEC form used for period and fiscal-year inference."""
+    normalized = filing_type.strip().upper()
+    return normalized[:-2] if normalized.endswith("/A") else normalized
 
 
 def _turns_over_new_year(report_date: dt.date, fy_end: tuple[int, int] | None) -> bool:
@@ -325,6 +332,7 @@ class SECDownloader:
         after_date: str,
         before_date: str,
         limit: int = 20,
+        include_amends: bool = False,
     ) -> None:
         """
         Download filings for a single ticker/type combination.
@@ -338,6 +346,7 @@ class SECDownloader:
                 limit=limit,
                 after=after_date,
                 before=before_date,
+                include_amends=include_amends,
             )
             logger.debug("Downloaded %s %s (%s – %s)", ticker, filing_type, after_date, before_date)
         except Exception as exc:
@@ -354,6 +363,8 @@ class SECDownloader:
         tickers: list[str],
         filing_types: list[str],
         years: list[int],
+        *,
+        include_amends: bool = False,
     ) -> list[FilingMeta]:
         """
         Download filings for *tickers* / *filing_types* / *years* and return
@@ -383,6 +394,7 @@ class SECDownloader:
                     after_date,
                     before_date,
                     limit=_download_limit_for_range(filing_type, years),
+                    include_amends=include_amends,
                 )
 
         # Collect metadata for everything on disk (current run + prior runs)
@@ -408,17 +420,19 @@ class SECDownloader:
                 root = _filing_root(self.download_dir, ticker, filing_type)
                 for doc_path, accession in _iter_filing_paths(root):
                     metadata = _parse_submission_metadata(doc_path.parent)
+                    actual_filing_type = metadata.get("filing_type", filing_type).strip().upper()
+                    base_filing_type = _base_filing_type(actual_filing_type)
                     report_date = _parse_yyyymmdd(metadata.get("period_of_report"))
                     filed_date = _parse_yyyymmdd(metadata.get("filed_date"))
                     fiscal_year = _infer_fiscal_year(
-                        filing_type,
+                        base_filing_type,
                         report_date,
                         metadata.get("fiscal_year_end"),
                     )
                     if fiscal_year not in year_set:
                         continue
                     period = _infer_period(
-                        filing_type,
+                        base_filing_type,
                         report_date,
                         metadata.get("fiscal_year_end"),
                     )
@@ -427,7 +441,7 @@ class SECDownloader:
                     results.append(
                         (
                             resolved_ticker,
-                            filing_type,
+                            actual_filing_type,
                             fiscal_year,
                             period,
                             doc_path,
