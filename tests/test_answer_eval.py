@@ -57,6 +57,34 @@ def test_accepted_answer_uses_normalized_exact_match():
     assert result["records"][0]["answer_correct"] is True
 
 
+def test_expected_value_in_reasoning_does_not_override_wrong_final_answer():
+    answer = """### Final Answer
+The balance sheet reports total liabilities and equity of $59,268 million.
+
+Total Assets = $59,268 - $18,078 = $41,190 million [1].
+
+Costco's total assets at the end of FY2021 were $41,190 million."""
+    record = evaluate(
+        [prediction(answer=answer)],
+        [gold(expected_values=[59268])],
+    )["records"][0]
+
+    assert record["answer_correct"] is False
+
+
+def test_expected_label_in_analysis_does_not_override_wrong_conclusion():
+    answer = """Data Center increased substantially, while Client also grew.
+
+### Conclusion
+The Client segment saw the largest proportional increase [1]."""
+    record = evaluate(
+        [prediction(answer=answer)],
+        [gold(expected_values=["Data Center"])],
+    )["records"][0]
+
+    assert record["answer_correct"] is False
+
+
 def test_invalid_citation_index_fails_validity_and_support_proxy():
     result = evaluate([prediction(answer="Revenue was $100 million [2].")], [gold()])
     record = result["records"][0]

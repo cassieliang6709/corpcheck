@@ -31,6 +31,16 @@ from evaluation.metrics import mean, normalize_text
 
 _CITATION_RE = re.compile(r"\[\s*(\d+(?:\s*,\s*\d+)*)\s*\]")
 _NUMBER_RE = re.compile(r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?![\w.])")
+_FINAL_SECTION_RES = (
+    re.compile(
+        r"(?im)^[ \t]{0,3}#{1,6}[ \t]+"
+        r"(?:final[ \t]+answer|answer|conclusion)\b[ \t]*:?[ \t]*"
+    ),
+    re.compile(
+        r"(?im)^[ \t]*(?:\*\*)?final[ \t]+answer(?:\*\*)?[ \t]*:[ \t]*"
+    ),
+)
+_DIRECT_ANSWER_MAX_CHARS = 280
 
 
 class RecordError(ValueError):
@@ -123,6 +133,24 @@ def _number_tokens(text: str) -> set[Decimal]:
     return values
 
 
+def _expected_value_scope(answer: str) -> str:
+    """Return the explicit or inferred final-answer portion of a response."""
+    markers = [match for pattern in _FINAL_SECTION_RES for match in pattern.finditer(answer)]
+    if markers:
+        stripped = answer[max(markers, key=lambda match: match.start()).end() :].strip()
+    else:
+        stripped = answer.strip()
+        if len(stripped) <= _DIRECT_ANSWER_MAX_CHARS:
+            return stripped
+
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", stripped) if part.strip()]
+    if len(paragraphs) > 1:
+        return paragraphs[-1]
+
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", stripped) if part.strip()]
+    return sentences[-1] if sentences else stripped
+
+
 def answer_matches(answer: str, gold: dict[str, Any], *, source: str) -> bool:
     """Score explicit accepted answers and expected values deterministically."""
     accepted = gold.get("accepted_answers", [])
@@ -143,11 +171,13 @@ def answer_matches(answer: str, gold: dict[str, Any], *, source: str) -> bool:
     semantic_answer = _CITATION_RE.sub("", answer)
     normalized = normalize_text(semantic_answer)
     accepted_match = any(normalized == normalize_text(candidate) for candidate in accepted)
-    numeric_tokens = _number_tokens(answer)
+    expected_scope = _CITATION_RE.sub("", _expected_value_scope(answer))
+    normalized_expected_scope = normalize_text(expected_scope)
+    numeric_tokens = _number_tokens(expected_scope)
     expected_match = bool(expected) and all(
         Decimal(str(value)) in numeric_tokens
         if isinstance(value, (int, float))
-        else normalize_text(value) in normalized
+        else normalize_text(value) in normalized_expected_scope
         for value in expected
     )
     return accepted_match or expected_match
