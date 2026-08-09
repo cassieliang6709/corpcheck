@@ -4,6 +4,7 @@ and model hyperparameters.
 """
 
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -85,6 +86,29 @@ TICKER_TO_COMPANY_NAME: dict[str, str] = {
     "LOW": "Lowe's Companies, Inc.",
     "TJX": "The TJX Companies, Inc.",
     "DG": "Dollar General Corporation",
+    # Company-disjoint FinanceBench held-out issuers. These are intentionally
+    # absent from SECTORS, so they do not expand the default ingestion universe.
+    "MMM": "3M Company",
+    "AES": "The AES Corporation",
+    "ATVI": "Activision Blizzard, Inc.",
+    "ADBE": "Adobe Inc.",
+    "AMCR": "Amcor plc",
+    "AXP": "American Express Company",
+    "AWK": "American Water Works Company, Inc.",
+    "BBY": "Best Buy Co., Inc.",
+    "XYZ": "Block, Inc.",
+    "BA": "The Boeing Company",
+    "KO": "The Coca-Cola Company",
+    "GLW": "Corning Incorporated",
+    "GIS": "General Mills, Inc.",
+    "KHC": "The Kraft Heinz Company",
+    "LMT": "Lockheed Martin Corporation",
+    "MGM": "MGM Resorts International",
+    "NFLX": "Netflix, Inc.",
+    "PYPL": "PayPal Holdings, Inc.",
+    "PEP": "PepsiCo, Inc.",
+    "ULTA": "Ulta Beauty, Inc.",
+    "VZ": "Verizon Communications Inc.",
 }
 
 # Flat list of all project tickers

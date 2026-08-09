@@ -33,9 +33,28 @@ Amazon already occurs in development. It also excludes 10-Q, 8-K, and earnings
 documents so the first held-out corpus expansion has one clear ingestion
 contract.
 
-The held-out dataset must be materialized from the source lock above without
-changing this rule. It is not currently runnable: the 21 issuer mappings and 45
-filings still need to be added to an isolated corpus.
+Materialize the held-out dataset from the source lock above without changing
+this rule:
+
+```bash
+.venv/bin/python -m evaluation.materialize_financebench_holdout \
+  --source tmp/datasets/financebench_open_source.jsonl \
+  --output evaluation/runs/R10_financebench_holdout/financebench_holdout.json \
+  --manifest-output evaluation/runs/R10_financebench_holdout/ingestion_manifest.json
+```
+
+The materializer verifies both source hashes, derives `doc_type` and
+`doc_period`, requires resolvable ticker provenance for every row, checks the
+frozen counts, and refuses to overwrite different output. The locked output has
+SHA-256
+`f2d8ba8b3f1717166c862cc320c8c7a7678d19a4f3dd9c9438f1a74519ad5eae`.
+The deduplicated 45-document ingestion manifest has SHA-256
+`2b17d7354f4a49f78f249422d49d3df9269d2c0977da0403ed878671f7aa4b10`.
+
+The dataset is materialized locally but retrieval evaluation is not yet
+runnable: the 45 filings still need to be added to an isolated corpus. The 21
+issuer mappings are available for explicit ingestion but remain outside the
+default 50-company universe.
 
 ## Acceptance gates
 

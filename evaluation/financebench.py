@@ -34,7 +34,10 @@ def _build_name_index() -> dict[str, str]:
     """Map normalised company-name prefixes to tickers, from the project universe."""
     index: dict[str, str] = {}
     for ticker, name in TICKER_TO_COMPANY_NAME.items():
-        index[_normalize_name(name)] = ticker
+        normalized = _normalize_name(name)
+        index[normalized] = ticker
+        if normalized.startswith("the "):
+            index[normalized.removeprefix("the ")] = ticker
     return index
 
 
