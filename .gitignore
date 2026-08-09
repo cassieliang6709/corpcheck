@@ -46,6 +46,7 @@ Thumbs.db
 .env
 evaluation/runs/
 evaluation/runs/*/queries.jsonl
+docker/financial_rag.dump
 
 # The *.html rule above targets downloaded SEC filings, not the landing page.
 !landing/*.html

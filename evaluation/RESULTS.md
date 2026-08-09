@@ -364,3 +364,63 @@ absolute pair, never "2× / 5× better".
    `alpha=0.7` and the RRF fusion strategy were fixed before these runs and held
    constant across all four configurations. Nothing in §4 is a tuned result. The
    corollary is that nothing in §4 is a *tuned-optimal* result either.
+
+---
+
+## 8. R5 table-row child experiment (2026-08-09)
+
+Failure analysis attributed 19 of 30 reachable strict misses to table
+candidate/context failures. R5 tested an evaluation-only dense arm over 130,084
+row children derived from 29,570 table parents. Each child inherited the table
+title and available header/year rows; retrieval still returned the original
+parent chunk so citations and the overlap protocol remained comparable.
+
+| metric | feature off | feature on |
+| --- | ---: | ---: |
+| strict 0.5 clean gated Recall@10 | 0.1429 | 0.1429 |
+| loose 0.2 clean gated Recall@10 | 0.4714 | 0.5143 |
+| zero-in-scope-evidence queries | 4/35 | 4/35 |
+| median latency | 169 ms | 1,351 ms |
+| p95 latency | 461 ms | 2,374 ms |
+
+The experiment failed its predeclared acceptance criteria: strict Recall did not
+reach 0.2500, no strict miss became a hit, and p95 latency increased by roughly
+5.15x instead of staying within +50%. Two questions became new loose-threshold
+hits and none were lost, so the representation has some signal, but the arm is
+**rejected as a production default** and remains behind a default-off flag.
+
+Artifacts: `evaluation/runs/R5_table_child_off_postcode/` and
+`evaluation/runs/R5_table_child_on/`. The complete decision rule and failure
+breakdown are in `evaluation/NEXT_RETRIEVAL_EXPERIMENT.md`.
+
+---
+
+## 9. Metadata coverage abstention seed (2026-08-09)
+
+The cosine gate was strong enough to allow two requests whose retrieved text was
+semantically similar but whose metadata made an answer impossible: Costco
+FY2099 and OpenAI's FY2023 SEC annual filing. A deterministic pre-generation
+coverage check now rejects a definite issuer or fiscal-year miss before falling
+through to the unchanged cosine thresholds.
+
+The no-filter retrieval-only run used nine hand-selected records: seven
+answerable FinanceBench questions and the two controls above.
+
+| metric | cosine only | metadata + cosine |
+| --- | ---: | ---: |
+| correct answerability decisions | 7/9 | 9/9 |
+| answerable questions allowed | 7/7 | 7/7 |
+| should-abstain controls refused | 0/2 | 2/2 |
+
+The refusal statuses are auditable: Costco FY2099 is `year_mismatch`; OpenAI is
+`unknown_company`. Retrieval ranking and the cosine thresholds were unchanged.
+
+This is **not an answer-generation result**. Retrieval-only mode deliberately
+records empty answers when a question is allowed, and no `SGLANG_BASE_URL` was
+configured for this run. The sample is also tiny and hand-selected, so 9/9 is a
+regression result for these cases, not a broad abstention-accuracy claim.
+
+Artifacts: `evaluation/datasets/answer_eval_seed.json`,
+`evaluation/runs/R5_answer_seed/metadata-gate.jsonl`, and
+`evaluation/runs/R5_answer_seed/metadata-gate-summary.json`. Design and risk
+analysis: `evaluation/NEXT_ABSTAIN_EXPERIMENT.md`.

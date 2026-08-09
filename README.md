@@ -288,12 +288,30 @@ It consumes recorded `/chat`-shaped outputs and never contacts a model or the
 database while scoring. Supporting chunk ids measure provenance, not semantic
 entailment.
 
+A small no-filter seed is included for exercising the pre-generation path:
+
+```bash
+HF_HUB_OFFLINE=1 .venv/bin/python -m evaluation.collect_answer_predictions \
+  --retrieval-only \
+  --output evaluation/runs/answer-seed/predictions.jsonl
+```
+
+On its nine hand-selected records, the metadata coverage gate improved correct
+answerability decisions from 7/9 to 9/9: all seven answerable questions remained
+allowed, while a nonexistent Costco FY2099 request and an issuer absent from the
+corpus were refused. This is a narrow regression seed, not a generation-quality
+benchmark; no LLM endpoint was configured for this run, so answer and citation
+accuracy are not reported.
+
 Failure analysis of the current strict misses found that 19 of 30 reachable
-misses are table-retrieval failures. The next isolated experiment therefore
-builds searchable row children with inherited table headers while returning the
-existing parent chunk for citation. The evaluation-only representation prototype
-is in `evaluation/table_child_experiment.py`; it does not alter production
-retrieval or write to the database.
+misses are table-retrieval failures. A subsequent isolated experiment built
+130,084 searchable row children from 29,570 benchmark-scoped table parents while
+returning the existing parent chunk for citation. It improved loose Recall@10
+from 0.4714 to 0.5143 but left strict Recall@10 unchanged at 0.1429 and increased
+p95 latency from 461 ms to 2,374 ms. The arm therefore remains disabled by
+default. Its parser, resumable indexer, feature flag, and full stop/continue
+decision are retained for reproducibility; see
+`evaluation/NEXT_RETRIEVAL_EXPERIMENT.md`.
 
 **How a hit is defined.** FinanceBench gives a gold evidence *span* — a page or
 table lifted from the filing — not a chunk id. Our chunk boundaries differ, so
@@ -368,7 +386,8 @@ Phase 1 progress:
 - [x] **Strict abstain gating** — `/chat` refuses before contacting the LLM when
       the retrieved evidence is too weak. Gated on raw dense cosine rather than
       the fused score, with thresholds calibrated against the corpus
-      (`evaluation/calibrate_abstain.py`).
+      (`evaluation/calibrate_abstain.py`). Explicit issuer and fiscal-year
+      coverage mismatches are also refused before generation.
 - [x] **MCP server** — `check_answerable` / `search_filings` / `get_filing_context`
       over stdio, routed through the same `retrieve()` entry point. Exports the
       abstain gate as something a client can query *before* answering.
