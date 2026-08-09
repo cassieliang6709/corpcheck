@@ -422,9 +422,13 @@ tuning.
    tickers, with 469,874/469,874 chunks embedded, at payload SHA-256
    `b5c1faf898eecb2e8c35b21fe724a5f7a8505922f15db1241caba5e2e60f2675`.
    It records deterministic SEC raw-submission URLs without database
-   credentials and refuses to overwrite a different manifest. A local cache
-   audit found only 141/1,662 raw submissions remain, so the other 1,521 must be
-   recovered before a full cleaner rebuild can be considered matched.
+   credentials and refuses to overwrite a different manifest. An exact local
+   cache audit found 141 raw files: 138 were already at their deterministic
+   manifest paths, while three valid PXD submissions were stored under a legacy
+   CIK-named directory. All 141 passed full-file hashing and SEC-header
+   validation and have been copied to their deterministic paths in the isolated
+   recovery tree. The remaining 1,521 submissions must be recovered before a
+   full cleaner rebuild can be considered matched.
 
    Recovery is manifest-driven, resumable, and isolated from the production
    cache. It validates the manifest signature and each submission's SEC header,
