@@ -300,8 +300,16 @@ On its nine hand-selected records, the metadata coverage gate improved correct
 answerability decisions from 7/9 to 9/9: all seven answerable questions remained
 allowed, while a nonexistent Costco FY2099 request and an issuer absent from the
 corpus were refused. This is a narrow regression seed, not a generation-quality
-benchmark; no LLM endpoint was configured for this run, so answer and citation
-accuracy are not reported.
+benchmark.
+
+A subsequent local, no-cost generation run used Qwen 2.5 7B through Ollama with
+an 8,192-token context. It answered 1/7 answerable questions correctly, included
+valid citation indices on 5/7, correctly handled all nine answerability
+decisions, and passed the combined end-to-end rule on 3/9 records (the one
+correct cited answer plus both correct refusals). Manual failure analysis found
+that six of seven answerable questions lacked the gold evidence in the retrieved
+chunks, so this run primarily confirms that retrieval remains the bottleneck; it
+is not a claim about larger hosted models.
 
 Failure analysis of the current strict misses found that 19 of 30 reachable
 misses are table-retrieval failures. A subsequent isolated experiment built

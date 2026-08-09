@@ -351,10 +351,11 @@ absolute pair, never "2× / 5× better".
    deliberate: it buys an identical corpus on both sides, which a checkout
    cannot.
 
-6. **This report measures retrieval only.** A separate deterministic answer
-   scorer now exists for answer correctness, citation validity, supporting-chunk
-   provenance, and abstention, but no recorded 35-question generation run is
-   reported here yet. Semantic citation entailment also remains unmeasured.
+6. **The full 35-question report still measures retrieval only.** Section 10
+   adds a nine-record local generation smoke test, but the 35-question source
+   data does not yet carry the accepted-answer and abstention labels required by
+   the deterministic answer scorer. Semantic citation entailment also remains
+   unmeasured.
 
 7. **Single-issuer, single-period questions only.** The filtered set covers 10
    issuers over 2018–2023. No cross-company comparison, no cross-year trend
@@ -424,3 +425,38 @@ Artifacts: `evaluation/datasets/answer_eval_seed.json`,
 `evaluation/runs/R5_answer_seed/metadata-gate.jsonl`, and
 `evaluation/runs/R5_answer_seed/metadata-gate-summary.json`. Design and risk
 analysis: `evaluation/NEXT_ABSTAIN_EXPERIMENT.md`.
+
+---
+
+## 10. R6 local answer-generation smoke test (2026-08-09)
+
+The nine-record seed was run end to end against the same live retrieval corpus
+using the locally installed Qwen 2.5 7B Q4_K_M model through Ollama's
+OpenAI-compatible endpoint. The runtime context was explicitly raised from
+4,096 to 8,192 tokens and `SGLANG_MAX_TOKENS` was set to 768; all retrieved
+context fit without the input truncation observed in the discarded first run.
+No paid API or external generation service was used.
+
+| metric | R6 result |
+| --- | ---: |
+| correct answerability decisions | 9/9 |
+| answer accuracy, answerable records | 1/7 |
+| citation presence | 5/7 |
+| citation index validity | 5/7 |
+| end-to-end pass | 3/9 |
+
+The end-to-end passes are one correct cited answer and the two correct
+pre-generation refusals. Citation *indices* being valid only means the cited
+chunk numbers exist; semantic citation support was not scored because this seed
+does not yet contain stable supporting chunk ids.
+
+Manual review found that six of seven answerable questions did not have their
+gold evidence in the ten retrieved chunks. The remaining Costco question had
+the needed balance-sheet value and was answered correctly. This is evidence
+that retrieval coverage is the immediate bottleneck for this seed, not evidence
+that a 7B local model is sufficient for production. The 35-question generation
+run remains blocked on creating and reviewing a proper answer-evaluation gold
+contract rather than mapping long reference answers to brittle exact matches.
+
+Local gitignored artifacts:
+`evaluation/runs/R6_answer_qwen25_7b_8k/predictions.jsonl` and `summary.json`.
