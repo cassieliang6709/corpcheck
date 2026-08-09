@@ -465,7 +465,39 @@ Artifacts: `evaluation/runs/R8_filing_local_sparse_off/summary-v2.json` and
 
 ---
 
-## 11. R6 local answer-generation smoke test (2026-08-09)
+## 11. Generic filing-local hybrid probe (2026-08-10)
+
+A second development-only probe removed all hand-authored metric cues. It used
+the production query parser to resolve an explicit issuer, year, form, and (for
+10-Q) quarter, then fused the production top 10 with filing-local dense results
+and a sparse OR query derived mechanically from PostgreSQL English lexemes.
+The local candidates passed through the same section-aware revision filter.
+
+| metric | feature off | feature on | gate |
+| --- | ---: | ---: | ---: |
+| strict 0.5 clean gated Recall@10 | 0.1429 | 0.1714 | at least 0.2500 |
+| loose 0.2 clean gated Recall@10 | 0.4714 | 0.5000 | at least 0.4714 |
+| zero-in-scope-evidence queries | 4/35 | 3/35 | no increase |
+| offline single-run p95 latency | 486.9 ms | 504.9 ms | at most +50% |
+
+The only new strict hit was `financebench_id_02419`; no strict or loose hit was
+lost. The offline rerun used `HF_HUB_OFFLINE=1`. The latency numbers are only a
+non-regression signal because off and on still ran sequentially rather than as
+a repeated paired benchmark.
+
+This arm is also **rejected** because strict Recall@10 remained below the
+predeclared gate. Its implementation was removed rather than added to production.
+The 35 questions have now informed multiple designs and must be treated as
+development data; a future representation/reranking experiment needs a larger
+pre-split held-out slice before it can support a production claim.
+
+Artifacts: `evaluation/runs/R9_generic_filing_local_off/`,
+`evaluation/runs/R9_generic_filing_local_on/`, and
+`evaluation/runs/R9_generic_filing_local_comparison.json` (gitignored).
+
+---
+
+## 12. R6 local answer-generation smoke test (2026-08-09)
 
 The nine-record seed was run end to end against the same live retrieval corpus
 using the locally installed Qwen 2.5 7B Q4_K_M model through Ollama's
