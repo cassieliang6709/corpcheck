@@ -402,9 +402,12 @@ tuning.
    titles in adjacent one-row tables/wrappers and `<td>`-encoded period, unit,
    and year headers. Synthetic regressions cover title leakage, fact-row loss,
    TOC donors, and currency values that resemble years; real isolated
-   re-ingestion is still required before measuring the arm. Only if gold parents
-   enter the candidate pool but still miss top 10 will a generic reranker be
-   added.
+   re-ingestion is still required before measuring the arm. The fail-closed
+   `evaluation/validate_table_representation_pair.py` runner locks the exact
+   AMZN FY2019 and Nike FY2018 accessions, requires a pristine target database,
+   checks semantic table metadata and question-only strict overlap, and proves
+   the benchmark database remains unchanged. Only if gold parents enter the
+   candidate pool but still miss top 10 will a generic reranker be added.
 4. **Create a real held-out contract before tuning that arm.** The current 35
    questions have informed multiple designs and are development data, not proof
    of generalisation. An audit of the official 150-record open-source
