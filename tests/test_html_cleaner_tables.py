@@ -103,6 +103,282 @@ class HTMLCleanerTableTests(unittest.TestCase):
         self.assertIn("[ROW] 2022 | $23,601", fs_text)
         self.assertIn("[/TABLE]", fs_text)
 
+    def test_table_inherits_title_from_preceding_one_row_table(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html><body>
+          <h1>ITEM 8. Financial Statements</h1>
+          <table>
+            <tr><td>Example Corp. Consolidated Statements of Income</td></tr>
+          </table>
+          <table>
+            <tr><td>Year Ended May 31,</td></tr>
+            <tr><td>(In millions, except per share data)</td>
+                <td>2023</td><td>2022</td><td>2021</td></tr>
+            <tr><td>Revenue</td><td>100</td><td>90</td><td>80</td></tr>
+          </table>
+        </body></html>
+        """
+
+        segments = cleaner.clean_text_segments(html)
+        tables = [segment for segment in segments if segment.content_kind == "table"]
+
+        self.assertEqual(len(tables), 1)
+        self.assertEqual(
+            tables[0].display_title,
+            "Example Corp. Consolidated Statements of Income",
+        )
+        self.assertEqual(
+            tables[0].meta["header_text"],
+            "Year Ended May 31, | (In millions, except per share data) | 2023 | 2022 | 2021",
+        )
+        self.assertIn("[ROW] Revenue | 100 | 90 | 80", tables[0].text)
+
+    def test_table_finds_semantic_title_across_nearby_wrapper(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html><body>
+          <h1>ITEM 8. Financial Statements</h1>
+          <div><p>Example Corp. Consolidated Balance Sheets</p></div>
+          <div><table>
+            <tr><td>December 31,</td></tr>
+            <tr><td>2023</td><td>2022</td></tr>
+            <tr><td>Total assets</td><td>250</td><td>225</td></tr>
+          </table></div>
+        </body></html>
+        """
+
+        segments = cleaner.clean_text_segments(html)
+        table = next(segment for segment in segments if segment.content_kind == "table")
+
+        self.assertEqual(table.display_title, "Example Corp. Consolidated Balance Sheets")
+        self.assertEqual(table.meta["header_text"], "December 31, | 2023 | 2022")
+
+    def test_plain_td_data_table_does_not_invent_title_or_header(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html><body>
+          <h1>ITEM 1. Business</h1>
+          <p>Regional operating data follows.</p>
+          <table>
+            <tr><td>North America</td><td>120</td></tr>
+            <tr><td>Europe</td><td>95</td></tr>
+          </table>
+        </body></html>
+        """
+
+        segments = cleaner.clean_text_segments(html)
+        table = next(segment for segment in segments if segment.content_kind == "table")
+
+        self.assertIsNone(table.meta["header_text"])
+        self.assertIn("[ROW] North America | 120", table.text)
+
+    def test_audit_sentence_does_not_become_financial_table_title(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html><body>
+          <h1>ITEM 8. Financial Statements</h1>
+          <p>We audited the consolidated statements of income using standard procedures.</p>
+          <table>
+            <tr><td>Year Ended December 31,</td></tr>
+            <tr><td>2023</td><td>2022</td></tr>
+            <tr><td>Revenue</td><td>100</td><td>90</td></tr>
+          </table>
+        </body></html>
+        """
+
+        segments = cleaner.clean_text_segments(html)
+        table = next(segment for segment in segments if segment.content_kind == "table")
+
+        self.assertEqual(table.display_title, "Table 1")
+
+    def test_toc_table_does_not_donate_title_to_following_data_table(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html><body>
+          <h1>ITEM 8. Financial Statements</h1>
+          <p>Index follows.</p>
+          <table>
+            <tr><td>Consolidated Statements of Income</td><td>38</td></tr>
+            <tr><td>Consolidated Balance Sheets</td><td>40</td></tr>
+          </table>
+          <table>
+            <tr><td>Year Ended December 31,</td></tr>
+            <tr><td>2023</td><td>2022</td></tr>
+            <tr><td>Revenue</td><td>100</td><td>90</td></tr>
+          </table>
+        </body></html>
+        """
+
+        segments = cleaner.clean_text_segments(html)
+        tables = [segment for segment in segments if segment.content_kind == "table"]
+
+        self.assertEqual(tables[-1].display_title, "Table 2")
+
+    def test_currency_values_that_look_like_years_remain_data_rows(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html><body>
+          <h1>ITEM 8. Financial Statements</h1>
+          <p>Quarterly detail follows.</p>
+          <table>
+            <tr><td>$2,023</td><td>$2,022</td></tr>
+            <tr><td>Other revenue</td><td>10</td></tr>
+          </table>
+        </body></html>
+        """
+
+        segments = cleaner.clean_text_segments(html)
+        table = next(segment for segment in segments if segment.content_kind == "table")
+
+        self.assertIsNone(table.meta["header_text"])
+        self.assertIn("[ROW] $2,023 | $2,022", table.text)
+
+    def test_as_of_fact_row_remains_a_data_row(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html><body>
+          <h1>ITEM 1. Business</h1>
+          <p>Workforce data follows.</p>
+          <table>
+            <tr><td>Employees as of December 31</td><td>2023</td></tr>
+            <tr><td>Contractors</td><td>250</td></tr>
+          </table>
+        </body></html>
+        """
+
+        segments = cleaner.clean_text_segments(html)
+        table = next(segment for segment in segments if segment.content_kind == "table")
+
+        self.assertIsNone(table.meta["header_text"])
+        self.assertIn("[ROW] Employees as of December 31 | 2023", table.text)
+
+    def test_inline_statement_title_preserves_year_cells_as_header(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html><body>
+          <h1>ITEM 8. Financial Statements</h1>
+          <p>Audited results follow.</p>
+          <table>
+            <tr><td>Consolidated Statements of Income</td><td>2023</td><td>2022</td></tr>
+            <tr><td>Revenue</td><td>100</td><td>90</td></tr>
+          </table>
+        </body></html>
+        """
+
+        segments = cleaner.clean_text_segments(html)
+        table = next(segment for segment in segments if segment.content_kind == "table")
+
+        self.assertEqual(table.display_title, "Consolidated Statements of Income")
+        self.assertEqual(table.meta["header_text"], "2023 | 2022")
+        self.assertIn("[ROW] Revenue | 100 | 90", table.text)
+
+    def test_condensed_unaudited_statement_title_is_recognised(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-Q", min_section_length=1)
+        html = """
+        <html><body>
+          <p>PART I — FINANCIAL INFORMATION</p>
+          <p>Item 1. Financial Statements</p>
+          <p>Unaudited results follow.</p>
+          <table>
+            <tr><td>Unaudited Condensed Consolidated Balance Sheets</td></tr>
+            <tr><td>December 31,</td><td>2023</td><td>2022</td></tr>
+            <tr><td>Total assets</td><td>250</td><td>225</td></tr>
+          </table>
+        </body></html>
+        """
+
+        segments = cleaner.clean_text_segments(html)
+        table = next(segment for segment in segments if segment.content_kind == "table")
+
+        self.assertEqual(
+            table.display_title,
+            "Unaudited Condensed Consolidated Balance Sheets",
+        )
+
+    def test_statement_title_does_not_cross_unrelated_narrative(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html><body>
+          <h1>ITEM 8. Financial Statements</h1>
+          <p>Consolidated Statements of Income</p>
+          <p>The following schedule summarizes lease maturities.</p>
+          <table>
+            <tr><td>Year Ended December 31,</td></tr>
+            <tr><td>2023</td><td>2022</td></tr>
+            <tr><td>Lease payments</td><td>100</td><td>90</td></tr>
+          </table>
+        </body></html>
+        """
+
+        segments = cleaner.clean_text_segments(html)
+        table = next(segment for segment in segments if segment.content_kind == "table")
+
+        self.assertNotEqual(table.display_title, "Consolidated Statements of Income")
+
+    def test_statement_name_with_prose_suffix_is_not_a_title(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html><body>
+          <h1>ITEM 8. Financial Statements</h1>
+          <p>Consolidated Statements of Income are incorporated by reference elsewhere.</p>
+          <table>
+            <tr><td>Year Ended December 31,</td></tr>
+            <tr><td>2023</td><td>2022</td></tr>
+            <tr><td>Revenue</td><td>100</td><td>90</td></tr>
+          </table>
+        </body></html>
+        """
+
+        segments = cleaner.clean_text_segments(html)
+        table = next(segment for segment in segments if segment.content_kind == "table")
+
+        self.assertEqual(table.display_title, "Table 1")
+
+    def test_unit_only_row_and_year_row_form_a_header(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
+        html = """
+        <html><body>
+          <h1>ITEM 8. Financial Statements</h1>
+          <p>Consolidated Balance Sheets</p>
+          <table>
+            <tr><td>(In millions)</td></tr>
+            <tr><td>2023</td><td>2022</td></tr>
+            <tr><td>Total assets</td><td>250</td><td>225</td></tr>
+          </table>
+        </body></html>
+        """
+
+        segments = cleaner.clean_text_segments(html)
+        table = next(segment for segment in segments if segment.content_kind == "table")
+
+        self.assertEqual(table.meta["header_text"], "(In millions) | 2023 | 2022")
+
+    def test_three_line_quarter_header_is_preserved(self) -> None:
+        cleaner = HTMLCleaner(filing_type="10-Q", min_section_length=1)
+        html = """
+        <html><body>
+          <p>PART I — FINANCIAL INFORMATION</p>
+          <p>Item 1. Financial Statements</p>
+          <p>Quarterly results follow.</p>
+          <table>
+            <tr><td>(In millions)</td></tr>
+            <tr><td>Three Months Ended</td></tr>
+            <tr><td>March 31,</td></tr>
+            <tr><td>2023</td><td>2022</td></tr>
+            <tr><td>Revenue</td><td>100</td><td>90</td></tr>
+          </table>
+        </body></html>
+        """
+
+        segments = cleaner.clean_text_segments(html)
+        table = next(segment for segment in segments if segment.content_kind == "table")
+
+        self.assertEqual(
+            table.meta["header_text"],
+            "(In millions) | Three Months Ended | March 31, | 2023 | 2022",
+        )
+
     def test_clean_text_promotes_single_row_item_tables_into_sections(self) -> None:
         cleaner = HTMLCleaner(filing_type="10-K", min_section_length=1)
         html = """

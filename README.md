@@ -398,20 +398,25 @@ tuning.
    of current gold parents confirmed the representation failure: relevant Amazon
    and Nike statement tables are stored as `Table 119` and `Table 117`, with
    `header_text = null`, even though their opening rows contain the reporting
-   period and years. The next arm will first recover semantic table titles and
-   `<td>`-encoded header/year rows, re-ingest a small isolated filing set, and
-   measure whether the gold parents enter the candidate pool. Only if they enter
-   the pool but still miss top 10 will a generic reranker be added.
+   period and years. The cleaner now has a guarded implementation for semantic
+   titles in adjacent one-row tables/wrappers and `<td>`-encoded period, unit,
+   and year headers. Synthetic regressions cover title leakage, fact-row loss,
+   TOC donors, and currency values that resemble years; real isolated
+   re-ingestion is still required before measuring the arm. Only if gold parents
+   enter the candidate pool but still miss top 10 will a generic reranker be
+   added.
 4. **Create a real held-out contract before tuning that arm.** The current 35
    questions have informed multiple designs and are development data, not proof
    of generalisation. An audit of the official 150-record open-source
    FinanceBench file found 115 records outside this slice, but only two point to
    a supported filing already present in this corpus (`AMAZON_2017_10K`). Two
    questions from one issuer are not a credible held-out benchmark. The corpus
-   therefore needs new issuers and filing years, followed by a predeclared split
-   and gates, before representation or reranking gains can support a production
-   claim. Benchmark PDFs may be used for parser diagnosis, but not as a substitute
-   for validating the production SEC ingestion path.
+   therefore needs new issuers and filing years before representation or
+   reranking gains can support a production claim. The metadata-only held-out
+   rule is now frozen at 80 questions across 45 10-K documents and 21 issuers;
+   see `evaluation/FINANCEBENCH_SPLIT.md` for the source lock and acceptance
+   gates. Benchmark PDFs may be used for parser diagnosis, but not as a
+   substitute for validating the production SEC ingestion path.
 5. **Repair corpus coverage separately.** The CVS FY2018 turnover evidence is
    absent from the indexed FY2018 filing chunks, so query/ranking changes cannot
    recover it. The cleaner now has a fail-closed path for a 10-K that explicitly

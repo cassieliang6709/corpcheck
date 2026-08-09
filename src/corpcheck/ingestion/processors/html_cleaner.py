@@ -137,6 +137,32 @@ BOILERPLATE_PHRASES = [
 ]
 
 _TABLE_BLOCK_RE = re.compile(r"\[TABLE\].*?\[/TABLE\]", re.S)
+_FINANCIAL_TABLE_TITLE_RE = re.compile(
+    r"\b(?:(?:unaudited|condensed|combined)\s+)*(?:consolidated\s+)?(?:"
+    r"statements?\s+of\s+(?:operations|income(?:\s+and\s+comprehensive\s+income)?|"
+    r"earnings|comprehensive\s+income|"
+    r"cash\s+flows?|financial\s+position|changes\s+in\s+(?:shareholders['’]?|"
+    r"stockholders['’]?)\s+equity|(?:shareholders['’]?|stockholders['’]?)\s+equity)|"
+    r"balance\s+sheets?|selected\s+financial\s+data"
+    r")\b",
+    re.I,
+)
+_REPORTING_PERIOD_CELL_RE = re.compile(
+    r"^(?:for\s+the\s+)?(?:"
+    r"(?:(?:one|two|three|six|nine|twelve|\d+)\s+)?"
+    r"(?:years?|months?|quarters?)\s+ended(?:\s+|,\s*)?"
+    r"(?:january|february|march|april|may|june|july|august|september|"
+    r"october|november|december)?\s*\d{0,2}|"
+    r"(?:as\s+of\s+)?(?:january|february|march|april|may|june|july|august|"
+    r"september|october|november|december)\s+\d{1,2}"
+    r")[,\s]*$",
+    re.I,
+)
+_YEAR_CELL_RE = re.compile(r"^(?:FY\s*)?(?:19|20)\d{2}$", re.I)
+_TABLE_UNIT_CELL_RE = re.compile(
+    r"^\(?\s*in\s+(?:thousands|millions|billions)(?:,?\s+except\b.*)?\)?$",
+    re.I,
+)
 _ITEM_ROW_RE = re.compile(
     r"^\[ROW\]\s*(ITEM\s+\d+[A-Z]?(?:\.\d+)?)\.?\s*\|\s*([^\|\n]+?)\s*$",
     re.I | re.M,
@@ -384,6 +410,103 @@ class HTMLCleaner:
         text = re.sub(r"\s+", " ", text)
         return text.strip()
 
+    def _semantic_table_title_text(self, text: str) -> str | None:
+        """Return a title-shaped financial-statement label, if present."""
+        combined = self._normalize_cell_text(text)
+        if not combined or len(combined) > 160 or len(combined.split()) > 18:
+            return None
+
+        match = _FINANCIAL_TABLE_TITLE_RE.search(combined)
+        if not match:
+            return None
+
+        prefix = combined[: match.start()].strip(" -–—:")
+        suffix = combined[match.end() :].strip()
+        if prefix and not (
+            prefix.isupper()
+            or re.search(
+                r"\b(?:inc\.?|corp\.?|corporation|company|ltd\.?|plc|llc)\s*$",
+                prefix,
+                re.I,
+            )
+        ):
+            return None
+        if suffix and not re.fullmatch(r"(?:\([^)]{1,60}\))?[\s\-–—:]*", suffix):
+            return None
+        return combined
+
+    def _semantic_table_title(self, tag: Tag) -> str | None:
+        return self._semantic_table_title_text(tag.get_text(" ", strip=True))
+
+    def _table_is_data_like(self, table: Tag) -> bool:
+        rows = table.find_all("tr")
+        if len(rows) < 2:
+            return False
+        return any(
+            re.search(r"\d", cell.get_text(" ", strip=True))
+            for row in rows
+            for cell in row.find_all(["th", "td"])
+        )
+
+    def _nearby_semantic_table_title(self, table: Tag) -> str | None:
+        """Inspect only the nearest non-empty preceding block at each DOM level."""
+        if not self._table_is_data_like(table):
+            return None
+
+        node = table
+        for _depth in range(3):
+            sibling = node.previous_sibling
+            while sibling is not None:
+                if isinstance(sibling, NavigableString):
+                    sibling_text = self._normalize_cell_text(str(sibling))
+                    if sibling_text:
+                        return self._semantic_table_title_text(sibling_text)
+                if isinstance(sibling, Tag):
+                    sibling_text = self._normalize_cell_text(
+                        sibling.get_text(" ", strip=True)
+                    )
+                    if not sibling_text:
+                        sibling = sibling.previous_sibling
+                        continue
+                    if sibling.name == "table":
+                        nonempty_cells = [
+                            cell
+                            for cell in sibling.find_all(["th", "td"])
+                            if self._normalize_cell_text(
+                                cell.get_text(" ", strip=True)
+                            )
+                        ]
+                        if self._table_is_data_like(sibling) or len(nonempty_cells) != 1:
+                            return None
+                    return self._semantic_table_title_text(sibling_text)
+                sibling = sibling.previous_sibling
+
+            parent = node.parent
+            if not isinstance(parent, Tag) or parent.name in {"body", "html"}:
+                break
+            node = parent
+        return None
+
+    def _looks_like_td_header(self, values: list[str]) -> bool:
+        """Recognise reporting-period rows in SEC tables that omit ``<th>``."""
+        first_cell = self._normalize_cell_text(values[0])
+        if len(values) == 1 and _TABLE_UNIT_CELL_RE.fullmatch(first_cell):
+            return True
+        if _REPORTING_PERIOD_CELL_RE.fullmatch(first_cell):
+            return len(values) == 1 or all(
+                _YEAR_CELL_RE.fullmatch(self._normalize_cell_text(value))
+                for value in values[1:]
+            )
+
+        year_cells = 0
+        for value in values:
+            cleaned = self._normalize_cell_text(value)
+            if _YEAR_CELL_RE.fullmatch(cleaned):
+                year_cells += 1
+            elif not _TABLE_UNIT_CELL_RE.fullmatch(cleaned):
+                return False
+        return year_cells >= 2
+
     def _infer_table_title(self, table: Tag, table_index: int) -> str:
         """Best-effort table title extraction."""
         caption = table.find("caption")
@@ -399,12 +522,28 @@ class HTMLCleaner:
                 if cleaned:
                     return cleaned
 
+        for row in table.find_all("tr", limit=2):
+            for cell in row.find_all(["th", "td"]):
+                inline_title = self._semantic_table_title(cell)
+                if inline_title:
+                    return inline_title
+
+        nearby_title = self._nearby_semantic_table_title(table)
+        if nearby_title:
+            return nearby_title
+
         for sibling in table.previous_siblings:
             if not isinstance(sibling, Tag):
                 continue
+            if sibling.name == "table":
+                break
             if sibling.name not in {"p", "div", "strong", "b", "h1", "h2", "h3", "h4"}:
                 continue
             sibling_text = self._normalize_cell_text(sibling.get_text(" ", strip=True))
+            if _FINANCIAL_TABLE_TITLE_RE.search(sibling_text) or _ITEM_HEADER_RE.match(
+                sibling_text
+            ):
+                break
             if sibling_text and len(sibling_text) <= 160:
                 return sibling_text
 
@@ -413,7 +552,7 @@ class HTMLCleaner:
     def _serialize_table(self, table: Tag, table_index: int) -> str | None:
         """Convert an HTML table into structured plain text."""
         title = self._infer_table_title(table, table_index)
-        row_texts: list[str] = []
+        rows: list[tuple[list[str], bool]] = []
         header_line: str | None = None
 
         for row in table.find_all("tr"):
@@ -426,11 +565,49 @@ class HTMLCleaner:
             if not values:
                 continue
 
-            line = " | ".join(values)
-            if header_line is None and row.find("th"):
-                header_line = f"[HEADER] {line}"
-            else:
-                row_texts.append(f"[ROW] {line}")
+            rows.append((values, row.find("th") is not None))
+
+        if not rows:
+            return None
+
+        if title != f"Table {table_index}":
+            for index, (values, _has_th) in enumerate(rows[:2]):
+                for value_index, value in enumerate(values):
+                    if self._normalize_cell_text(value) != title:
+                        continue
+                    remaining_values = values[:value_index] + values[value_index + 1 :]
+                    if remaining_values:
+                        rows[index] = (remaining_values, _has_th)
+                    else:
+                        rows.pop(index)
+                    break
+                else:
+                    continue
+                break
+
+        if not rows:
+            return None
+
+        explicit_header_index = next(
+            (index for index, (_values, has_th) in enumerate(rows) if has_th),
+            None,
+        )
+        if explicit_header_index is not None:
+            header_values, _ = rows.pop(explicit_header_index)
+            header_line = f"[HEADER] {' | '.join(header_values)}"
+        else:
+            inferred_header_rows: list[list[str]] = []
+            while rows:
+                values, _has_th = rows[0]
+                if not self._looks_like_td_header(values):
+                    break
+                inferred_header_rows.append(rows.pop(0)[0])
+            if inferred_header_rows:
+                header_line = "[HEADER] " + " | ".join(
+                    value for values in inferred_header_rows for value in values
+                )
+
+        row_texts = [f"[ROW] {' | '.join(values)}" for values, _has_th in rows]
 
         if not row_texts and header_line is None:
             return None
@@ -447,12 +624,16 @@ class HTMLCleaner:
         Replace HTML tables with a structured plain-text representation so
         row/column relationships survive downstream chunking and retrieval.
         """
-        table_index = 0
-        for table in soup.find_all("table"):
-            if table.find_parent("table") is not None:
-                continue
-            table_index += 1
-            serialized = self._serialize_table(table, table_index)
+        tables = [
+            table
+            for table in soup.find_all("table")
+            if table.find_parent("table") is None
+        ]
+        serialized_tables = [
+            (table, self._serialize_table(table, table_index))
+            for table_index, table in enumerate(tables, start=1)
+        ]
+        for table, serialized in serialized_tables:
             if serialized:
                 table.replace_with(NavigableString(f"\n{serialized}\n"))
             else:
@@ -565,7 +746,10 @@ class HTMLCleaner:
             if isinstance(element, NavigableString):
                 text = str(element).strip()
                 if text:
-                    texts.append(text)
+                    if text.startswith("[TABLE]"):
+                        texts.append(f"\n{text}\n")
+                    else:
+                        texts.append(text)
             elif isinstance(element, Tag) and element.name in {
                 "p", "div", "tr", "br", "h1", "h2", "h3", "h4", "h5", "li"
             }:
