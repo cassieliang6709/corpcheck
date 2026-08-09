@@ -198,6 +198,120 @@ class FakePool:
         return self._records
 
 
+class ContextPool:
+    """Route direct-context SQL to realistic filing, chunk, and amendment rows."""
+
+    def __init__(self, anchor_section="Financial Statements"):
+        self.anchor_section = anchor_section
+        self.context_rows_requested = False
+
+    async def fetchrow(self, sql, *args):
+        if "FROM chunks c" in sql and "WHERE c.id = $1" in sql:
+            return {
+                "filing_id": 10,
+                "chunk_index": 82 if self.anchor_section == "Financial Statements" else 50,
+                "section_name": self.anchor_section,
+                "ticker": "GME",
+                "filing_type": "10-K",
+                "fiscal_year": 2024,
+                "period": "annual",
+            }
+        if "WHERE f.accession_number = $1" in sql:
+            return {
+                "filing_id": 10,
+                "ticker": "GME",
+                "filing_type": "10-K",
+                "fiscal_year": 2024,
+                "period": "annual",
+                "section_name": "Financial Statements",
+            }
+        if "LEFT JOIN companies" in sql:
+            return {
+                "ticker": "GME",
+                "company_name": "GameStop Corp.",
+                "filing_type": "10-K",
+                "fiscal_year": 2024,
+                "period": "annual",
+                "filed_date": None,
+                "period_of_report": None,
+                "accession_number": "0001326380-24-000012",
+                "cik": "0001326380",
+                "source_url": "https://example.invalid/gme-10k",
+            }
+        raise AssertionError(f"Unexpected fetchrow SQL: {sql}")
+
+    async def fetch(self, sql, *args):
+        if "SELECT DISTINCT" in sql and "filing_type LIKE '%/A'" in sql:
+            return [
+                {
+                    "ticker": "GME",
+                    "filing_type": "10-K/A",
+                    "fiscal_year": 2024,
+                    "period": "annual",
+                    "section_name": "Item 5",
+                }
+            ]
+        if "SELECT id::text AS chunk_id" in sql:
+            self.context_rows_requested = True
+            return [
+                {
+                    "chunk_id": "50",
+                    "chunk_index": 50,
+                    "section_name": "Market for Common Equity",
+                    "content": "obsolete Item 5 text",
+                },
+                {
+                    "chunk_id": "82",
+                    "chunk_index": 82,
+                    "section_name": "Financial Statements",
+                    "content": "still authoritative Item 8 text",
+                },
+            ]
+        raise AssertionError(f"Unexpected fetch SQL: {sql}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "lookup",
+    [
+        {"chunk_id": "82", "window": 10},
+        {"accession_number": "0001326380-24-000012", "max_chunks": 10},
+    ],
+)
+async def test_context_lookup_filters_amended_neighbours_for_both_paths(
+    monkeypatch, lookup
+):
+    pool = ContextPool()
+
+    async def fake_get_pool():
+        return pool
+
+    monkeypatch.setattr(mcp_server, "get_pool", fake_get_pool)
+    context = build_server()._tool_manager._tools["get_filing_context"].fn
+
+    result = await context(**lookup)
+
+    assert [row["chunk_id"] for row in result["chunks"]] == ["82"]
+    assert result["superseded_chunks_omitted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_context_lookup_explicitly_withholds_a_superseded_anchor(monkeypatch):
+    pool = ContextPool(anchor_section="Market for Common Equity")
+
+    async def fake_get_pool():
+        return pool
+
+    monkeypatch.setattr(mcp_server, "get_pool", fake_get_pool)
+    context = build_server()._tool_manager._tools["get_filing_context"].fn
+
+    result = await context(chunk_id="50", window=10)
+
+    assert result["superseded"] is True
+    assert result["text_withheld"] is True
+    assert "MARKET FOR COMMON EQUITY" in result["reason"]
+
+
 @pytest.mark.asyncio
 async def test_direct_lookup_without_section_uses_conservative_wildcard():
     pool = FakePool(

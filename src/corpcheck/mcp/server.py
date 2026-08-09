@@ -32,6 +32,7 @@ from corpcheck import settings as config
 from corpcheck.db import close_pool, get_pool
 from corpcheck.mcp.provenance import (
     evidence_block,
+    filter_superseded_context_rows,
     load_filing_provenance,
     superseded_check,
 )
@@ -363,24 +364,25 @@ def build_server() -> MCPServer:
             limit = max_chunks
 
         # Version governance applies to direct lookup too, not only to search.
-        blocked, message = await superseded_check(
-            pool,
-            {
-                "source_type": "sec",
-                "company": anchor["ticker"],
-                "filing_type": anchor["filing_type"],
-                "fiscal_year": anchor["fiscal_year"],
-                "period_label": anchor["period"],
-                "section_name": anchor["section_name"],
-            },
-        )
-        if blocked:
-            return {
-                "superseded": True,
-                "text_withheld": True,
-                "reason": message,
-                "governance": _corpus_governance(),
-            }
+        if chunk_id:
+            blocked, message = await superseded_check(
+                pool,
+                {
+                    "source_type": "sec",
+                    "company": anchor["ticker"],
+                    "filing_type": anchor["filing_type"],
+                    "fiscal_year": anchor["fiscal_year"],
+                    "period_label": anchor["period"],
+                    "section_name": anchor["section_name"],
+                },
+            )
+            if blocked:
+                return {
+                    "superseded": True,
+                    "text_withheld": True,
+                    "reason": message,
+                    "governance": _corpus_governance(),
+                }
 
         filing = await pool.fetchrow(
             """
@@ -406,6 +408,7 @@ def build_server() -> MCPServer:
             high,
             limit,
         )
+        rows, dropped_rows = await filter_superseded_context_rows(pool, anchor, rows)
 
         return {
             "filing": {
@@ -425,6 +428,7 @@ def build_server() -> MCPServer:
                 "source_url": filing["source_url"],
             },
             "superseded": False,
+            "superseded_chunks_omitted": len(dropped_rows),
             "anchor_chunk_id": chunk_id,
             "chunks": [
                 {

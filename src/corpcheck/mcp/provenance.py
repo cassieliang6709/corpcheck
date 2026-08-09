@@ -23,6 +23,7 @@ import asyncpg
 from corpcheck.models import ChunkResult
 from corpcheck.retrieval.revision import (
     filing_key_for_row,
+    filter_superseded_rows,
     is_amendment,
     is_superseded,
     load_superseded_filings,
@@ -146,3 +147,35 @@ async def superseded_check(
         "disclosure the filer has since changed is the most damaging error this "
         "system can make. Search for the amendment instead."
     )
+
+
+async def filter_superseded_context_rows(
+    pool: asyncpg.Pool,
+    filing: dict[str, Any],
+    rows: Sequence[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Filter direct-lookup rows by section using the shared revision policy.
+
+    A context window and an accession lookup can contain several sections. The
+    filing-level metadata identifies the revision group, while each row's own
+    ``section_name`` determines whether that particular text remains authoritative.
+    """
+    candidates = [
+        {
+            "chunk_id": str(row["chunk_id"]),
+            "source_type": "sec",
+            "company": filing["ticker"],
+            "filing_type": filing["filing_type"],
+            "fiscal_year": filing["fiscal_year"],
+            "period_label": filing["period"],
+            "section_name": row["section_name"],
+        }
+        for row in rows
+    ]
+    superseded = await load_superseded_filings(pool, candidates)
+    kept_candidates, dropped_candidates = filter_superseded_rows(candidates, superseded)
+    kept_ids = {row["chunk_id"] for row in kept_candidates}
+    dropped_ids = {row["chunk_id"] for row in dropped_candidates}
+    kept = [dict(row) for row in rows if str(row["chunk_id"]) in kept_ids]
+    dropped = [dict(row) for row in rows if str(row["chunk_id"]) in dropped_ids]
+    return kept, dropped
