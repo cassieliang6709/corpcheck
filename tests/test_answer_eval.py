@@ -85,6 +85,43 @@ The Client segment saw the largest proportional increase [1]."""
     assert record["answer_correct"] is False
 
 
+@pytest.mark.parametrize("formatted", ["-473", "-$473", "$-473", "(473)", "($473.00)"])
+def test_negative_expected_value_accepts_financial_number_formats(formatted):
+    record = evaluate(
+        [prediction(answer=f"The change was {formatted} million [1].")],
+        [gold(expected_values=[-473])],
+    )["records"][0]
+
+    assert record["answer_correct"] is True
+
+
+def test_negative_financial_number_supports_commas_and_decimals():
+    record = evaluate(
+        [prediction(answer="The loss was ($1,473.50) million [1].")],
+        [gold(expected_values=[-1473.5])],
+    )["records"][0]
+
+    assert record["answer_correct"] is True
+
+
+def test_positive_number_does_not_match_negative_expected_value():
+    record = evaluate(
+        [prediction(answer="The change was $473 million [1].")],
+        [gold(expected_values=[-473])],
+    )["records"][0]
+
+    assert record["answer_correct"] is False
+
+
+def test_positive_numbers_and_years_still_match():
+    record = evaluate(
+        [prediction(answer="In 2024, the balance was $473 million [1].")],
+        [gold(expected_values=[2024, 473])],
+    )["records"][0]
+
+    assert record["answer_correct"] is True
+
+
 def test_invalid_citation_index_fails_validity_and_support_proxy():
     result = evaluate([prediction(answer="Revenue was $100 million [2].")], [gold()])
     record = result["records"][0]

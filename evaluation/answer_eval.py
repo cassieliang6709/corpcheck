@@ -30,7 +30,19 @@ from typing import Any, Optional
 from evaluation.metrics import mean, normalize_text
 
 _CITATION_RE = re.compile(r"\[\s*(\d+(?:\s*,\s*\d+)*)\s*\]")
-_NUMBER_RE = re.compile(r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?![\w.])")
+_NUMBER_BODY = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
+_NUMBER_RE = re.compile(
+    rf"""(?x)
+    (?<![\w.])
+    (?:
+        \(\s*\$?\s*(?P<accounting_number>{_NUMBER_BODY})\s*\)
+        |
+        (?P<leading_sign>[-+]?)\s*\$?\s*(?P<currency_sign>[-+]?)
+        (?P<plain_number>{_NUMBER_BODY})
+    )
+    (?![\w.])
+    """
+)
 _FINAL_SECTION_RES = (
     re.compile(
         r"(?im)^[ \t]{0,3}#{1,6}[ \t]+"
@@ -125,9 +137,15 @@ def _chunk_ids(chunks: list[Any], *, source: str) -> list[str]:
 
 def _number_tokens(text: str) -> set[Decimal]:
     values: set[Decimal] = set()
-    for token in _NUMBER_RE.findall(text):
+    for match in _NUMBER_RE.finditer(text):
+        accounting_number = match.group("accounting_number")
+        token = accounting_number or match.group("plain_number")
+        is_negative = accounting_number is not None or "-" in (
+            (match.group("leading_sign") or "") + (match.group("currency_sign") or "")
+        )
         try:
-            values.add(Decimal(token.replace(",", "")))
+            value = Decimal(token.replace(",", ""))
+            values.add(-value if is_negative else value)
         except InvalidOperation:  # pragma: no cover - regex only emits decimal forms
             pass
     return values
