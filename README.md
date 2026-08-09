@@ -4,8 +4,9 @@ Audit-grade fundamental research over SEC filings.
 
 CorpCheck is not a generic RAG wrapper. It is built on the premise that generic
 retrieval fails on financial disclosure because it treats a 10-K like prose:
-it ignores that filings are *versioned* (a `10-K/A` supersedes the `10-K` it
-amends), that management buries material risk in qualified language, and that a
+it ignores that filings are *versioned* (a `10-K/A` replaces the sections it
+amends while unchanged sections may still live only in the original), that
+management buries material risk in qualified language, and that a
 confidently wrong number is worse than no number at all.
 
 Three principles drive the design:
@@ -13,7 +14,7 @@ Three principles drive the design:
 1. **Deterministic IR evaluation over vibes.** Retrieval quality is measured with
    `Recall@k` and `MRR` against gold evidence, not eyeballed.
 2. **Strict provenance and version control.** Every chunk traces to a filing, and
-   superseded filings are excluded from the evidence set.
+   superseded sections are excluded without discarding unchanged disclosure.
 3. **Abstain beats hallucinate.** Below a retrieval-confidence floor the system
    refuses deterministically, without consulting the LLM.
 
@@ -129,10 +130,11 @@ measured cosine similarities rather than from a model's self-assessment. An agen
 that calls it first has a defensible reason to say "the filings do not cover
 this" — which is the whole thesis of the project, exported to any client.
 
-Version governance applies on both paths: superseded chunks are dropped from the
-candidate pool inside `retrieve()`, and `get_filing_context` runs the same
-supersession check before returning text, so an agent holding a stale accession
-number cannot route around the filter.
+Version governance applies on both paths: chunks from amended sections are
+dropped from the candidate pool inside `retrieve()`, while unchanged sections
+from the original remain available. `get_filing_context` runs the same
+section-aware check before returning text, so an agent holding a stale chunk id
+cannot route around the filter.
 
 ### A real session
 
@@ -243,10 +245,12 @@ opens the filing from `chunk_index` 0.
 
 The revision filter is wired into all three tools, but the corpus currently loaded
 contains **no amended filings** — 0 of 1,662 `filings` rows have a `filing_type`
-ending in `/A`. So the supersession path is covered by unit tests
-(`tests/test_mcp_server.py`) and by `tests/test_revision.py`, not by the live
-session above. Nothing here has been demonstrated to suppress a real superseded
-chunk, because there is not yet a real superseded chunk to suppress.
+ending in `/A`. The repository now includes a fixture based on GameStop's real
+March 2024 10-K/10-K/A pair. That amendment changes Item 5 only, so the tests
+prove section-aware composition: the original Item 5 is suppressed, the amended
+Item 5 survives, and unrelated original financial-statement sections remain
+available. This is still a repository-contained test with real SEC metadata, not
+a live-corpus demonstration.
 
 ## Data
 
@@ -268,6 +272,28 @@ attributable to retrieval alone.
 Reports `Recall@{1,3,5,10}`, `Hit@k`, and `MRR@10`, plus ablations and a
 threshold sweep. Per-query detail lands in `evaluation/runs/<label>/`, so two
 configurations can be diffed directly.
+
+Final-answer behavior has a separate deterministic scorer:
+
+```bash
+.venv/bin/python -m evaluation.answer_eval \
+  --predictions predictions.jsonl \
+  --gold gold.json \
+  --output evaluation/runs/<label>/answer-eval.json
+```
+
+It measures answer correctness, correct abstention, citation presence and index
+validity, a conservative supporting-chunk proxy, and an end-to-end pass rate.
+It consumes recorded `/chat`-shaped outputs and never contacts a model or the
+database while scoring. Supporting chunk ids measure provenance, not semantic
+entailment.
+
+Failure analysis of the current strict misses found that 19 of 30 reachable
+misses are table-retrieval failures. The next isolated experiment therefore
+builds searchable row children with inherited table headers while returning the
+existing parent chunk for citation. The evaluation-only representation prototype
+is in `evaluation/table_child_experiment.py`; it does not alter production
+retrieval or write to the database.
 
 **How a hit is defined.** FinanceBench gives a gold evidence *span* — a page or
 table lifted from the filing — not a chunk id. Our chunk boundaries differ, so
@@ -334,8 +360,9 @@ Phase 1 progress:
 
 - [x] **Deterministic IR evaluation suite** — `Recall@k` / `MRR` with token-overlap
       weak supervision, provenance gating, and an oracle ceiling check.
-- [x] **Revision-aware filtering** — `10-K/A` supersedes the `10-K` it amends;
-      resolved on the candidate pool before fusion.
+- [x] **Section-aware amendment composition** — amended sections replace their
+      original counterparts before fusion, while unchanged original sections
+      remain available.
 - [x] **Reciprocal Rank Fusion** — rank-based hybrid fusion, A/B-switchable
       against the previous min-max blend.
 - [x] **Strict abstain gating** — `/chat` refuses before contacting the LLM when

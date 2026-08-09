@@ -322,12 +322,13 @@ absolute pair, never "2× / 5× better".
 
 ## 7. Known limitations
 
-1. **Version governance has never fired on real data.** The corpus contains
+1. **Version governance has never fired in the live corpus.** The corpus contains
    **0 of 1,662** filings that are `10-K/A` or `10-Q/A` amendments. The
-   revision-aware filtering logic (commit `67673f2`) has unit-test coverage and
-   is exercised on synthetic fixtures only — it has **never been triggered by a
-   real document in this corpus**. Any claim that CorpCheck "handles restated
-   filings" is a claim about code paths, not about measured behaviour.
+   section-aware filtering logic has unit coverage plus a repository fixture
+   based on GameStop's real March 2024 10-K/10-K/A metadata; that pair proves why
+   unchanged original sections must remain available when an amendment changes
+   only Item 5. It has still **never been triggered by an amended document loaded
+   into this corpus**. Do not claim live-corpus validation.
 
 2. **The relevance signal is weak supervision, not gold labels.** FinanceBench
    gives an evidence *page/table*, not a chunk id. A "hit" is a token-overlap
@@ -350,9 +351,10 @@ absolute pair, never "2× / 5× better".
    deliberate: it buys an identical corpus on both sides, which a checkout
    cannot.
 
-6. **Only retrieval is measured.** No generation, no answer accuracy, no
-   end-to-end faithfulness. The abstain gate's behaviour on these 35 questions
-   is not scored here.
+6. **This report measures retrieval only.** A separate deterministic answer
+   scorer now exists for answer correctness, citation validity, supporting-chunk
+   provenance, and abstention, but no recorded 35-question generation run is
+   reported here yet. Semantic citation entailment also remains unmeasured.
 
 7. **Single-issuer, single-period questions only.** The filtered set covers 10
    issuers over 2018–2023. No cross-company comparison, no cross-year trend
