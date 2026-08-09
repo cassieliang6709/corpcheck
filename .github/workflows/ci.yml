@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: .
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[ingestion,mcp,dev]"
+
+      - name: Lint
+        # The legacy ingestion scripts are not yet Ruff-clean. Keep the active
+        # retrieval/evaluation surface enforced without hiding new failures.
+        run: |
+          ruff check \
+            src/corpcheck/settings.py \
+            src/corpcheck/retrieval \
+            src/corpcheck/api \
+            src/corpcheck/mcp \
+            evaluation \
+            tests/test_abstain.py \
+            tests/test_answer_eval.py \
+            tests/test_collect_answer_predictions.py \
+            tests/test_mcp_server.py \
+            tests/test_query_parse.py \
+            tests/test_real_amendment_governance.py \
+            tests/test_revision.py \
+            tests/test_table_child_experiment.py \
+            tests/test_table_child_index.py \
+            tests/test_table_child_retrieval.py
+
+      # These acceptance tests validate a pre-populated local corpus and do not
+      # skip when PostgreSQL is absent. Unit and integration tests remain in CI.
+      - name: Test
+        run: pytest -q --ignore=tests/test_acceptance_db.py

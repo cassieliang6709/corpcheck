@@ -62,8 +62,8 @@ def compute_rrf_scores(
 
     if normalize:
         scaled = minmax_normalize(raw_scores)
-        return dict(zip(all_cids, scaled))
-    return dict(zip(all_cids, raw_scores))
+        return dict(zip(all_cids, scaled, strict=True))
+    return dict(zip(all_cids, raw_scores, strict=True))
 
 
 def fuse_candidates(

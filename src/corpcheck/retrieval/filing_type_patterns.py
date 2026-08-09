@@ -1,6 +1,5 @@
 import re
 
-
 FILING_TYPE_PATTERNS: dict[str, re.Pattern[str]] = {
     "10-K": re.compile(
         r"\b10-k\b"                # "10-K" or "10-k" (with hyphen)
@@ -12,7 +11,7 @@ FILING_TYPE_PATTERNS: dict[str, re.Pattern[str]] = {
         r"|\byear.?end report\b"   # "year-end report" or "year end report"
         r"|\bfull.?year report\b"  # "full-year report" or "full year report"
         r"|\byearly report\b",
-        re.IGNORECASE
+        re.IGNORECASE,
     ),
     "10-Q": re.compile(
         r"\b10-q\b"
@@ -23,6 +22,6 @@ FILING_TYPE_PATTERNS: dict[str, re.Pattern[str]] = {
         r"|\bform 10q\b"
         r"|\bq[1-4] report\b"      # "Q1 report", "Q2 report", etc.
         r"|\bquarter.?end report\b",
-        re.IGNORECASE
+        re.IGNORECASE,
     ),
 }
