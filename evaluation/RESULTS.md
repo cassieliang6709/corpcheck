@@ -428,7 +428,44 @@ analysis: `evaluation/NEXT_ABSTAIN_EXPERIMENT.md`.
 
 ---
 
-## 10. R6 local answer-generation smoke test (2026-08-09)
+## 10. Filing-local disjunctive sparse experiment (2026-08-10)
+
+An evaluation-only prototype resolved a single filing from query-derived
+issuer, period, and form metadata, then added a disjunctive PostgreSQL full-text
+search inside that filing. Six transparent metric-cue rules were written from
+already-known failures, so this was a diagnostic upper-bound experiment, not an
+untuned generalisation result.
+
+| metric | feature off | feature on | gate |
+| --- | ---: | ---: | ---: |
+| strict 0.5 clean gated Recall@10 | 0.1429 | 0.2000 | at least 0.2500 |
+| newly recovered strict misses | — | 2 | at least 5 |
+| loose 0.2 clean gated Recall@10 | 0.4714 | 0.4429 | no regression |
+| loose top-10 query hits | 17/35 | 16/35 | diagnostic only |
+| zero-in-scope-evidence queries | 4/35 | 4/35 | no increase |
+| single-run p95 latency | 457 ms | 319 ms | at most +50% |
+
+The two strict recoveries were `financebench_id_00563` and
+`financebench_id_00757`; `financebench_id_00669` lost its loose hit. The latency
+numbers are reported for completeness but are not interpreted as a speedup:
+the runs were sequential, included model/database warm-up effects, and the
+enabled path performs extra SQL. The recall gates already fail, so more latency
+tuning cannot change the decision.
+
+The arm is **rejected**. Its benchmark-tuned implementation was removed rather
+than retained behind a production flag. The useful diagnostic is that some gold
+parents entered the filing-local candidate pool without reaching top 10, which
+points to a generic reranking experiment; that follow-up must not contain
+FinanceBench-specific phrase rules. The prototype also queried `chunks`
+directly and therefore bypassed the production revision filter, another reason
+it was unsuitable for serving even if its recall had passed.
+
+Artifacts: `evaluation/runs/R8_filing_local_sparse_off/summary-v2.json` and
+`evaluation/runs/R8_filing_local_sparse_on/summary-v2.json` (gitignored).
+
+---
+
+## 11. R6 local answer-generation smoke test (2026-08-09)
 
 The nine-record seed was run end to end against the same live retrieval corpus
 using the locally installed Qwen 2.5 7B Q4_K_M model through Ollama's

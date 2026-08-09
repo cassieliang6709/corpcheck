@@ -380,20 +380,30 @@ above the ceiling indicates a scoring bug.
 The next work is evidence coverage, not a larger language model or more prompt
 tuning.
 
-1. **Test a filing-local disjunctive sparse arm.** Resolve the filing from
-   query-derived issuer/period/form metadata, then search a small set of
-   transparent metric clauses with OR semantics inside that filing. The current
-   `plainto_tsquery` path effectively requires every surviving natural-language
-   term and returns no sparse candidates for several financial questions.
-2. **Require a measurable retrieval win.** The new arm must improve strict
-   Recall@10 and recover missing gold evidence without a material p95 regression.
-   It stays evaluation-only until it clears those gates.
+1. **Do not ship the filing-local disjunctive sparse arm.** The evaluation-only
+   prototype moved strict Recall@10 from 0.1429 to 0.2000 (5 to 7 hit queries),
+   below the predeclared 0.2500 and five-recovery gates, while loose Recall@10
+   fell from 0.4714 to 0.4429. Its six metric rules came from known failures,
+   so the result is diagnostic rather than evidence of generalisation; the
+   prototype was removed instead of entering production.
+2. **Test generic filing-local reranking next.** The rejected arm did place the
+   reachable AMD evidence in top 10, but Amazon and Nike evidence remained in
+   the larger filing-local candidate pool. The next experiment must derive its
+   scope and relevance entirely from normal query parsing and dense similarity,
+   with no benchmark-specific metric phrases. It must still improve strict
+   Recall@10 without a material p95 regression before any production change.
 3. **Repair corpus coverage separately.** The CVS FY2018 turnover evidence is
    absent from the indexed FY2018 filing chunks, so query/ranking changes cannot
-   recover it. That filing needs isolated re-ingestion and chunk verification.
+   recover it. The cleaner now has a fail-closed path for a 10-K that explicitly
+   incorporates an `ARS`/`EX-13*` annual report: it retains only recognised
+   Financial Statements segments and ignores unrelated exhibits. Synthetic
+   regression coverage includes the three missing CVS values; the exact
+   accession still needs isolated redownload, re-ingestion, and chunk verification.
 4. **Complete live amendment validation.** The isolated GameStop 2024
    10-K/10-K/A validator is implemented and fail-closed. Running it requires a
-   real SEC contact user-agent; it will never write to the benchmark database.
+   real two-token SEC contact user-agent (`CorpCheck email@example.com`); it
+   preflights an empty target before schema creation and will never write to the
+   benchmark database.
 5. **Rerun answer generation only after retrieval improves.** Reuse the curated
    34-record gold and compare against the 1/34 baseline. Build a small demo only
    after the answer and citation evidence is credible.
