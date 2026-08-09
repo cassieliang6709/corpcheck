@@ -487,3 +487,210 @@ def test_processing_source_fingerprint_is_stable_sha256() -> None:
     assert first == reprocessor.processing_source_fingerprint()
     assert len(first) == 64
     int(first, 16)
+
+
+class OrchestrationConnection:
+    def __init__(self, database_name: str, snapshot: reprocessor.ChunkSnapshot) -> None:
+        self.database_name = database_name
+        self.snapshots = {41: snapshot}
+        self.session = None
+        self.closed = False
+
+    def set_session(self, **options) -> None:
+        self.session = options
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class OrchestrationLoader:
+    def __init__(self, connection: OrchestrationConnection, events: list[str]) -> None:
+        self.conn = connection
+        self.events = events
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        self.events.append("loader-close")
+
+    def replace_filing_chunks_atomic(self, filing_id, rows) -> int:
+        self.events.append("commit")
+        self.conn.snapshots[filing_id] = reprocessor.ChunkSnapshot(
+            len(rows), "b" * 64
+        )
+        return len(rows)
+
+
+def _orchestration_fixture(tmp_path, monkeypatch):
+    manifest, report, root, _ = valid_inputs(tmp_path)
+    loaded = reprocessor.load_reprocessing_inputs(manifest, report, root)
+    submission = loaded.submissions[0]
+    loaded = replace(loaded, submissions=(submission,))
+    filing = submission.filing
+    target = reprocessor.FilingTarget(
+        filing_id=41,
+        ticker=filing.ticker,
+        sector="tech",
+        form=filing.form,
+        fiscal_year=filing.fiscal_year,
+        period=filing.period,
+        filed_date=filing.filed_date,
+        period_of_report=filing.period_of_report,
+        accession=filing.accession,
+        cik=filing.cik,
+        source_url=filing.source_url,
+    )
+    baseline = reprocessor.ChunkSnapshot(1, "a" * 64)
+    old = OrchestrationConnection("old", baseline)
+    new = OrchestrationConnection("new", baseline)
+    events: list[str] = []
+    identity = reprocessor.DatabasePreflight(
+        reprocessor.CorpusIdentity("old", 1, 1, "c" * 64),
+        reprocessor.CorpusIdentity("new", 1, 1, "c" * 64),
+    )
+    monkeypatch.setattr(reprocessor, "load_reprocessing_inputs", lambda *_: loaded)
+    monkeypatch.setattr(reprocessor, "preflight_databases", lambda *_a, **_k: identity)
+    monkeypatch.setattr(
+        reprocessor,
+        "_targets_by_accession",
+        lambda *_: {filing.accession: target},
+    )
+
+    def snapshot(connection, filing_id):
+        events.append(f"snapshot-{connection.database_name}")
+        return connection.snapshots[filing_id]
+
+    monkeypatch.setattr(reprocessor, "_chunk_snapshot", snapshot)
+    kwargs = {
+        "old_database_url": "postgresql://db/old",
+        "new_database_url": "postgresql://db/new",
+        "manifest_path": manifest,
+        "recovery_report_path": report,
+        "recovery_root": root,
+        "checkpoint_path": tmp_path / "checkpoint.jsonl",
+        "output_path": tmp_path / "final.json",
+        "connect": lambda _url: old,
+        "loader_factory": lambda **_kwargs: OrchestrationLoader(new, events),
+        "processor": lambda *_: [{"chunk_index": 0}],
+    }
+    return kwargs, old, new, events, filing.accession
+
+
+def test_run_reprocessing_fresh_one_item_commits_and_reports(
+    tmp_path, monkeypatch
+) -> None:
+    kwargs, old, _new, events, accession = _orchestration_fixture(
+        tmp_path, monkeypatch
+    )
+
+    report = reprocessor.run_reprocessing(**kwargs)
+
+    assert report["records"][0]["accession"] == accession
+    assert report["records"][0]["chunk_sha256"] == "b" * 64
+    assert old.session == {
+        "isolation_level": "REPEATABLE READ",
+        "readonly": True,
+        "autocommit": False,
+    }
+    assert old.closed is True
+    assert events.count("commit") == 1
+
+
+def test_run_reprocessing_resume_skips_only_after_database_verification(
+    tmp_path, monkeypatch
+) -> None:
+    kwargs, _old, new, events, _accession = _orchestration_fixture(
+        tmp_path, monkeypatch
+    )
+    reprocessor.run_reprocessing(**kwargs)
+    Path(kwargs["output_path"]).unlink()
+    events.clear()
+    kwargs["processor"] = lambda *_: pytest.fail("completed filing must be skipped")
+
+    reprocessor.run_reprocessing(**kwargs)
+
+    assert "commit" not in events
+    assert events.count("snapshot-new") >= 2
+    assert new.snapshots[41].sha256 == "b" * 64
+
+
+def test_run_reprocessing_rejects_resume_after_commit_before_checkpoint(
+    tmp_path, monkeypatch
+) -> None:
+    kwargs, _old, new, events, _accession = _orchestration_fixture(
+        tmp_path, monkeypatch
+    )
+    monkeypatch.setattr(
+        reprocessor,
+        "append_success",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            reprocessor.CheckpointError("simulated checkpoint failure")
+        ),
+    )
+    with pytest.raises(reprocessor.CheckpointError, match="simulated"):
+        reprocessor.run_reprocessing(**kwargs)
+    assert events.count("commit") == 1
+
+    monkeypatch.undo()
+    # Restore the fixture's injected boundaries while retaining the committed
+    # new-DB state and header-only checkpoint from the interrupted first run.
+    loaded = reprocessor.load_reprocessing_inputs(
+        kwargs["manifest_path"], kwargs["recovery_report_path"], kwargs["recovery_root"]
+    )
+    submission = loaded.submissions[0]
+    loaded = replace(loaded, submissions=(submission,))
+    filing = submission.filing
+    target = reprocessor.FilingTarget(
+        filing_id=41,
+        ticker=filing.ticker,
+        sector="tech",
+        form=filing.form,
+        fiscal_year=filing.fiscal_year,
+        period=filing.period,
+        filed_date=filing.filed_date,
+        period_of_report=filing.period_of_report,
+        accession=filing.accession,
+        cik=filing.cik,
+        source_url=filing.source_url,
+    )
+    identity = reprocessor.DatabasePreflight(
+        reprocessor.CorpusIdentity("old", 1, 1, "c" * 64),
+        reprocessor.CorpusIdentity("new", 1, 1, "c" * 64),
+    )
+    monkeypatch.setattr(reprocessor, "load_reprocessing_inputs", lambda *_: loaded)
+    monkeypatch.setattr(reprocessor, "preflight_databases", lambda *_a, **_k: identity)
+    monkeypatch.setattr(
+        reprocessor, "_targets_by_accession", lambda *_: {filing.accession: target}
+    )
+    monkeypatch.setattr(
+        reprocessor,
+        "_chunk_snapshot",
+        lambda connection, filing_id: connection.snapshots[filing_id],
+    )
+
+    with pytest.raises(reprocessor.ReprocessInputError, match="untouched baseline"):
+        reprocessor.run_reprocessing(**kwargs)
+
+    assert new.snapshots[41].sha256 == "b" * 64
+    assert events.count("commit") == 1
+
+
+def test_run_reprocessing_checkpoints_only_after_commit_and_readback(
+    tmp_path, monkeypatch
+) -> None:
+    kwargs, _old, _new, events, _accession = _orchestration_fixture(
+        tmp_path, monkeypatch
+    )
+    real_append = reprocessor.append_success
+
+    def checked_append(*args, **options):
+        assert events[-2:] == ["commit", "snapshot-new"]
+        events.append("checkpoint")
+        return real_append(*args, **options)
+
+    monkeypatch.setattr(reprocessor, "append_success", checked_append)
+
+    reprocessor.run_reprocessing(**kwargs)
+
+    assert events.index("commit") < events.index("checkpoint")

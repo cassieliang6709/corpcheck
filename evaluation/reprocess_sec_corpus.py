@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
-"""Validate immutable SEC recovery inputs before corpus reprocessing.
-
-This module is deliberately read-only. Database mutation and checkpointing belong
-to a later reprocessing stage and must only consume the verified records returned
-here.
-"""
+"""Fail-closed, checkpointed reprocessing of a verified SEC corpus clone."""
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
 import stat
+import sys
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 from urllib.parse import unquote, urlsplit
 
 import numpy as np
@@ -26,7 +23,10 @@ import numpy as np
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
-from corpcheck.ingestion.config import EMBEDDING_DIM
+import psycopg2
+
+from corpcheck.ingestion.config import EMBEDDING_DIM, EMBEDDING_MODEL
+from corpcheck.ingestion.loaders.db_loader import DBLoader
 from evaluation.recover_sec_submissions import (
     CHUNK_BYTES,
     REPORT_SCHEMA_VERSION,
@@ -35,6 +35,14 @@ from evaluation.recover_sec_submissions import (
     RecoveryError,
     destination_for,
     load_manifest,
+)
+from evaluation.reprocess_checkpoint import (
+    CheckpointError,
+    RunContract,
+    SuccessRecord,
+    append_success,
+    create_checkpoint,
+    write_final_report,
 )
 
 REPORT_KEYS = {
@@ -87,6 +95,12 @@ class CorpusIdentity:
 class DatabasePreflight:
     old: CorpusIdentity
     new: CorpusIdentity
+
+
+@dataclass(frozen=True)
+class ChunkSnapshot:
+    count: int
+    sha256: str
 
 
 @dataclass(frozen=True)
@@ -664,3 +678,260 @@ def processing_source_fingerprint() -> str:
         digest.update(b"\0")
         digest.update(hashlib.sha256(content).digest())
     return digest.hexdigest()
+
+
+_TARGET_SQL = """
+    SELECT f.id AS filing_id, f.ticker, c.sector, f.filing_type AS form,
+           f.fiscal_year, f.period, f.filed_date, f.period_of_report,
+           f.accession_number AS accession, f.cik, f.source_url
+    FROM filings f
+    JOIN companies c ON c.ticker = f.ticker
+    WHERE f.accession_number = ANY(%s)
+    ORDER BY f.accession_number
+"""
+
+_CHUNK_STATE_SQL = """
+    SELECT chunk_index, ticker, sector, filing_type, fiscal_year, period,
+           filed_date, section_name, content, char_count, token_count,
+           numeric_token_count, number_density, data_signal_score,
+           is_quantitative, content_kind, chunk_strategy, display_title,
+           chunk_group_key, structure_meta, embedding::text AS embedding,
+           CASE WHEN embedding IS NULL THEN NULL ELSE vector_dims(embedding) END
+               AS embedding_dimension,
+           content_tsv::text AS content_tsv, source_url
+    FROM chunks
+    WHERE filing_id = %s
+    ORDER BY chunk_index
+"""
+
+
+def _sha256_file(path: Path) -> str:
+    return _hash_regular_file(path)[0]
+
+
+def _targets_by_accession(
+    connection: Any,
+    submissions: Sequence[VerifiedSubmission],
+) -> dict[str, FilingTarget]:
+    accessions = [submission.filing.accession for submission in submissions]
+    cursor = connection.cursor()
+    try:
+        cursor.execute(_TARGET_SQL, (accessions,))
+        if cursor.description is None:
+            raise ReprocessInputError("filing target query returned no columns")
+        columns = [item[0] for item in cursor.description]
+        rows = [_row_mapping(row, columns) for row in cursor.fetchall()]
+    finally:
+        cursor.close()
+    if columns != [field for field in FilingTarget.__dataclass_fields__]:
+        raise ReprocessInputError("filing target query returned invalid columns")
+    if len(rows) != len(accessions):
+        raise ReprocessInputError("new database does not contain every manifest accession")
+    if len({row["accession"] for row in rows}) != len(rows):
+        raise ReprocessInputError("new database returned duplicate filing targets")
+    targets = {row["accession"]: FilingTarget(**row) for row in rows}
+    if set(targets) != set(accessions):
+        raise ReprocessInputError("new database filing targets do not match the manifest")
+    for submission in submissions:
+        validate_filing_target(submission, targets[submission.filing.accession])
+    return targets
+
+
+def _chunk_snapshot(connection: Any, filing_id: int) -> ChunkSnapshot:
+    _, rows = _fetch_rows_with_params(connection, _CHUNK_STATE_SQL, (filing_id,))
+    if not rows:
+        raise ReprocessInputError(f"filing_id={filing_id} has no chunks")
+    indexes = [row["chunk_index"] for row in rows]
+    if indexes != list(range(len(rows))):
+        raise ReprocessInputError(f"filing_id={filing_id} chunk indexes are not contiguous")
+    if any(row["embedding"] is None for row in rows):
+        raise ReprocessInputError(f"filing_id={filing_id} has a missing embedding")
+    if any(row["embedding_dimension"] != EMBEDDING_DIMENSION for row in rows):
+        raise ReprocessInputError(f"filing_id={filing_id} has an invalid embedding dimension")
+    canonical = json.dumps(
+        _json_value(rows), sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return ChunkSnapshot(len(rows), hashlib.sha256(canonical).hexdigest())
+
+
+def _fetch_rows_with_params(
+    connection: Any,
+    sql: str,
+    params: tuple[Any, ...],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    cursor = connection.cursor()
+    try:
+        cursor.execute(sql, params)
+        if cursor.description is None:
+            raise ReprocessInputError("database query returned no columns")
+        columns = [item[0] for item in cursor.description]
+        return columns, [_row_mapping(row, columns) for row in cursor.fetchall()]
+    finally:
+        cursor.close()
+
+
+def _assert_record(
+    submission: VerifiedSubmission,
+    target: FilingTarget,
+    record: SuccessRecord,
+    new_connection: Any,
+) -> None:
+    digest, size = _hash_regular_file(submission.path)
+    if digest != submission.sha256 or size != submission.size:
+        raise ReprocessInputError(f"{record.accession} raw submission changed")
+    snapshot = _chunk_snapshot(new_connection, target.filing_id)
+    if (snapshot.count, snapshot.sha256) != (record.chunk_count, record.chunk_sha256):
+        raise ReprocessInputError(
+            f"{record.accession} database chunks do not match its checkpoint"
+        )
+
+
+def _run_contract(
+    inputs: ReprocessingInputs,
+    preflight: DatabasePreflight,
+) -> RunContract:
+    return RunContract(
+        old_database_name=preflight.old.database_name,
+        new_database_name=preflight.new.database_name,
+        manifest_sha256=inputs.manifest_payload_sha256,
+        recovery_report_sha256=_sha256_file(inputs.recovery_report_path),
+        cleaner_source_sha256=processing_source_fingerprint(),
+        embedding_model=EMBEDDING_MODEL,
+        embedding_dimension=EMBEDDING_DIMENSION,
+        expected_accessions=tuple(
+            sorted(submission.filing.accession for submission in inputs.submissions)
+        ),
+    )
+
+
+def run_reprocessing(
+    *,
+    old_database_url: str,
+    new_database_url: str,
+    manifest_path: Path,
+    recovery_report_path: Path,
+    recovery_root: Path,
+    checkpoint_path: Path,
+    output_path: Path,
+    connect: Callable[[str], Any] = psycopg2.connect,
+    loader_factory: Callable[..., Any] = DBLoader,
+    processor: Callable[..., list[dict[str, Any]]] = process_one_submission,
+) -> dict[str, Any]:
+    """Reprocess the exact verified accession set, aborting on the first error."""
+    old_endpoint, new_endpoint = validate_database_pair(
+        old_database_url, new_database_url
+    )
+    inputs = load_reprocessing_inputs(
+        manifest_path, recovery_report_path, recovery_root
+    )
+    old_connection = connect(old_database_url)
+    try:
+        old_connection.set_session(
+            isolation_level="REPEATABLE READ", readonly=True, autocommit=False
+        )
+        with loader_factory(dsn=new_database_url) as loader:
+            new_connection = loader.conn
+            initial = preflight_databases(
+                old_connection,
+                new_connection,
+                old_endpoint=old_endpoint,
+                new_endpoint=new_endpoint,
+            )
+            contract = _run_contract(inputs, initial)
+            state = create_checkpoint(checkpoint_path, contract)
+            targets = _targets_by_accession(new_connection, inputs.submissions)
+            records = {record.accession: record for record in state.records}
+
+            for index, submission in enumerate(inputs.submissions, start=1):
+                accession = submission.filing.accession
+                target = targets[accession]
+                record = records.get(accession)
+                if record is not None:
+                    _assert_record(submission, target, record, new_connection)
+                else:
+                    raw_digest, raw_size = _hash_regular_file(submission.path)
+                    if (raw_digest, raw_size) != (submission.sha256, submission.size):
+                        raise ReprocessInputError(f"{accession} raw submission changed")
+                    old_chunks = _chunk_snapshot(old_connection, target.filing_id)
+                    new_chunks = _chunk_snapshot(new_connection, target.filing_id)
+                    if old_chunks != new_chunks:
+                        # This also catches a prior crash after the DB commit but
+                        # before checkpoint append. Recovery is to restore a fresh
+                        # clone; guessing that the committed state is valid would
+                        # weaken the checkpoint contract.
+                        raise ReprocessInputError(
+                            f"{accession} pending filing is not an untouched baseline clone"
+                        )
+                    rows = processor(submission, target)
+                    loader.replace_filing_chunks_atomic(target.filing_id, rows)
+                    stored = _chunk_snapshot(new_connection, target.filing_id)
+                    if stored.count != len(rows):
+                        raise ReprocessInputError(
+                            f"{accession} committed chunk count does not match processor output"
+                        )
+                    record = SuccessRecord(
+                        accession=accession,
+                        raw_sha256=submission.sha256,
+                        chunk_count=stored.count,
+                        chunk_sha256=stored.sha256,
+                    )
+                    state = append_success(
+                        checkpoint_path, record, expected_contract=contract
+                    )
+                    records[accession] = record
+                if index % 25 == 0 or index == len(inputs.submissions):
+                    print(f"Verified {index}/{len(inputs.submissions)} filings")
+
+            for submission in inputs.submissions:
+                accession = submission.filing.accession
+                _assert_record(
+                    submission, targets[accession], records[accession], new_connection
+                )
+            final = preflight_databases(
+                old_connection,
+                new_connection,
+                old_endpoint=old_endpoint,
+                new_endpoint=new_endpoint,
+            )
+            if final != initial:
+                raise ReprocessInputError("database corpus identities changed during reprocessing")
+            return write_final_report(
+                checkpoint_path, output_path, expected_contract=contract
+            )
+    finally:
+        old_connection.close()
+
+
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--old-database-url", required=True)
+    parser.add_argument("--new-database-url", required=True)
+    parser.add_argument("--manifest", required=True, type=Path)
+    parser.add_argument("--recovery-report", required=True, type=Path)
+    parser.add_argument("--recovery-root", required=True, type=Path)
+    parser.add_argument("--checkpoint", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    return parser.parse_args(argv)
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    args = parse_args(argv)
+    try:
+        run_reprocessing(
+            old_database_url=args.old_database_url,
+            new_database_url=args.new_database_url,
+            manifest_path=args.manifest,
+            recovery_report_path=args.recovery_report,
+            recovery_root=args.recovery_root,
+            checkpoint_path=args.checkpoint,
+            output_path=args.output,
+        )
+    except (ReprocessInputError, CheckpointError, psycopg2.Error) as exc:
+        print(f"Reprocessing failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"Reprocessing report: {args.output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
