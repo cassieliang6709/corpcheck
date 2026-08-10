@@ -440,7 +440,8 @@ tuning.
      --manifest evaluation/runs/R11_table_representation/sec_corpus_manifest.json \
      --download-dir "$CORPCHECK_SEC_RECOVERY_DIR" \
      --report evaluation/runs/R11_table_representation/sec_recovery_report.json \
-     --transport curl
+     --transport curl \
+     --workers 4
    ```
 
    Use a real contact address locally; never commit it. Existing files are
@@ -450,7 +451,8 @@ tuning.
    `--transport curl` is the verified fallback for Python/OpenSSL environments
    that receive a TLS EOF from the SEC CDN. It keeps certificate verification,
    HTTPS-only redirects, atomic writes, bounded retries, and the same exact
-   header/hash checks.
+   header/hash checks. `--workers` is capped at four and all workers share the
+   same global SEC request-rate limiter.
 
    The post-recovery reprocessor is implemented and unit-tested, but has not
    mutated a live corpus. An audit found that the historical database lacks raw

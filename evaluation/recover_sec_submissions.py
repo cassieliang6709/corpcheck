@@ -8,6 +8,7 @@ recovery report. It never connects to or mutates a database.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import datetime as dt
 import hashlib
 import http.client
@@ -16,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -55,6 +57,7 @@ TRANSIENT_HTTP_STATUS = {408, 425, 429, 500, 502, 503, 504}
 MAX_HEADER_BYTES = 1_048_576
 CHUNK_BYTES = 64 * 1024
 MAX_ATTEMPTS_LIMIT = 5
+MAX_WORKERS = 4
 REPORT_SCHEMA_VERSION = 1
 SAFE_TICKER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SAFE_FORM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*(?:/[A-Za-z0-9][A-Za-z0-9-]*)?$")
@@ -112,14 +115,16 @@ class RateLimiter:
         self._clock = clock
         self._sleep = sleep
         self._last_request: Optional[float] = None
+        self._lock = threading.Lock()
 
     def wait(self) -> None:
-        now = self._clock()
-        if self._last_request is not None:
-            delay = self._last_request + self._interval - now
-            if delay > 0:
-                self._sleep(delay)
-        self._last_request = self._clock()
+        with self._lock:
+            now = self._clock()
+            if self._last_request is not None:
+                delay = self._last_request + self._interval - now
+                if delay > 0:
+                    self._sleep(delay)
+            self._last_request = self._clock()
 
 
 def _exact_keys(value: Any, expected: set[str], label: str) -> dict[str, Any]:
@@ -546,6 +551,7 @@ def recover_manifest(
     max_attempts: int = 3,
     timeout: float = 30,
     transport: str = "urllib",
+    workers: int = 1,
     opener: Callable[..., Any] = urllib.request.urlopen,
     curl_runner: Callable[..., Any] = subprocess.run,
     clock: Callable[[], float] = time.monotonic,
@@ -562,16 +568,19 @@ def recover_manifest(
         raise RecoveryError("--timeout must be greater than 0")
     if transport not in {"urllib", "curl"}:
         raise RecoveryError("--transport must be urllib or curl")
+    if isinstance(workers, bool) or not 1 <= workers <= MAX_WORKERS:
+        raise RecoveryError(f"--workers must be between 1 and {MAX_WORKERS}")
     resolved_download = validate_download_dir(download_dir)
     manifest_digest, filings = load_manifest(manifest_path)
     limiter = RateLimiter(max_rps, clock=clock, sleep=sleep)
 
-    records: list[FileRecord] = []
+    records: list[Optional[FileRecord]] = [None] * len(filings)
     resumed = 0
-    for filing in filings:
+
+    def recover(index: int) -> tuple[int, FileRecord, bool]:
         record, was_resumed = recover_one(
             resolved_download,
-            filing,
+            filings[index],
             user_agent=user_agent,
             limiter=limiter,
             max_attempts=max_attempts,
@@ -580,11 +589,33 @@ def recover_manifest(
             opener=opener,
             curl_runner=curl_runner,
         )
-        records.append(record)
-        resumed += int(was_resumed)
-        if progress is not None:
-            progress(len(records), len(filings), resumed)
-    report = build_report(manifest_digest, records)
+        return index, record, was_resumed
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+    futures = [executor.submit(recover, index) for index in range(len(filings))]
+    completed = 0
+    try:
+        for future in concurrent.futures.as_completed(futures):
+            index, record, was_resumed = future.result()
+            records[index] = record
+            resumed += int(was_resumed)
+            completed += 1
+            if progress is not None:
+                progress(completed, len(filings), resumed)
+    except BaseException:
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=True, cancel_futures=True)
+        raise
+    else:
+        executor.shutdown(wait=True)
+
+    if any(record is None for record in records):
+        raise RecoveryError("recovery completed without every manifest record")
+    report = build_report(
+        manifest_digest,
+        [record for record in records if record is not None],
+    )
     write_report_once(report_path, report)
     return report, resumed
 
@@ -598,6 +629,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max-attempts", type=int, default=3)
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--transport", choices=("urllib", "curl"), default="urllib")
+    parser.add_argument("--workers", type=int, default=1)
     return parser.parse_args(argv)
 
 
@@ -622,6 +654,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             max_attempts=args.max_attempts,
             timeout=args.timeout,
             transport=args.transport,
+            workers=args.workers,
             progress=show_progress,
         )
     except (RecoveryError, OSError) as exc:

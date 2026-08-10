@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import hashlib
 import json
 import subprocess
+import threading
 import urllib.error
 from pathlib import Path
 
@@ -317,6 +319,85 @@ def test_unknown_transport_fails_before_writing(tmp_path) -> None:
             tmp_path / "report.json",
             user_agent=REAL_USER_AGENT,
             transport="other",
+        )
+
+    assert not download_dir.exists()
+
+
+def test_parallel_recovery_overlaps_and_preserves_manifest_order(
+    monkeypatch, tmp_path
+) -> None:
+    first = spec()
+    second = dataclasses.replace(
+        first,
+        accession="0000320193-22-000108",
+        filed_date="2022-10-28",
+        period_of_report="2022-09-24",
+        full_submission_url=(
+            "https://www.sec.gov/Archives/edgar/data/320193/"
+            "000032019322000108/0000320193-22-000108.txt"
+        ),
+    )
+    monkeypatch.setattr(
+        recovery,
+        "load_manifest",
+        lambda _path: ("a" * 64, [first, second]),
+    )
+    barrier = threading.Barrier(2, timeout=2)
+    second_finished = threading.Event()
+    completion_order = []
+    bodies = {
+        first.full_submission_url: submission(),
+        second.full_submission_url: submission(
+            accession=second.accession,
+            filed_date="20221028",
+            period_of_report="20220924",
+        ),
+    }
+
+    def runner(command, **_options):
+        url = command[-1]
+        part_path = Path(command[command.index("--output") + 1])
+        barrier.wait()
+        if url == first.full_submission_url:
+            assert second_finished.wait(timeout=2)
+        part_path.write_bytes(bodies[url])
+        completion_order.append(url)
+        if url == second.full_submission_url:
+            second_finished.set()
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    report, resumed = recovery.recover_manifest(
+        tmp_path / "manifest.json",
+        tmp_path / "isolated",
+        tmp_path / "report.json",
+        user_agent=REAL_USER_AGENT,
+        transport="curl",
+        workers=2,
+        max_rps=10,
+        curl_runner=runner,
+    )
+
+    assert resumed == 0
+    assert completion_order == [second.full_submission_url, first.full_submission_url]
+    assert [item["relative_path"] for item in report["files"]] == [
+        recovery.destination_for(Path("/tmp"), filing).relative_to("/tmp").as_posix()
+        for filing in (first, second)
+    ]
+
+
+@pytest.mark.parametrize("workers", [0, 5, True])
+def test_invalid_worker_count_fails_before_writing(tmp_path, workers) -> None:
+    manifest, _ = manifest_file(tmp_path)
+    download_dir = tmp_path / "isolated"
+
+    with pytest.raises(recovery.RecoveryError, match="--workers"):
+        recovery.recover_manifest(
+            manifest,
+            download_dir,
+            tmp_path / "report.json",
+            user_agent=REAL_USER_AGENT,
+            workers=workers,
         )
 
     assert not download_dir.exists()
