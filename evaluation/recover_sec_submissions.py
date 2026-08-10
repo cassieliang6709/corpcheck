@@ -14,6 +14,7 @@ import http.client
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -68,6 +69,10 @@ class _HTTPStatusError(RuntimeError):
     def __init__(self, status: int):
         super().__init__(f"SEC returned HTTP {status}")
         self.status = status
+
+
+class _CurlTransferError(RuntimeError):
+    """curl failed before producing a verified SEC response."""
 
 
 @dataclass(frozen=True)
@@ -364,11 +369,67 @@ def _download_attempt(
     return FileRecord(relative_path="", sha256=digest.hexdigest(), size=size)
 
 
+def _curl_download_attempt(
+    filing: FilingSpec,
+    part_path: Path,
+    *,
+    user_agent: str,
+    timeout: float,
+    runner: Callable[..., Any] = subprocess.run,
+) -> FileRecord:
+    """Download with system curl while preserving the same atomic validation path."""
+    command = [
+        "curl",
+        "--disable",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--location",
+        "--proto",
+        "=https",
+        "--proto-redir",
+        "=https",
+        "--connect-timeout",
+        str(timeout),
+        "--speed-limit",
+        "1",
+        "--speed-time",
+        str(max(1, int(timeout))),
+        "--user-agent",
+        user_agent,
+        "--header",
+        "Accept-Encoding: identity",
+        "--output",
+        str(part_path),
+        filing.full_submission_url,
+    ]
+    try:
+        completed = runner(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise RecoveryError(f"cannot execute curl: {exc}") from exc
+    if completed.returncode != 0:
+        raise _CurlTransferError(f"curl exited with status {completed.returncode}")
+    try:
+        with part_path.open("rb+") as handle:
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError as exc:
+        raise RecoveryError(f"cannot fsync curl download {part_path}: {exc}") from exc
+    return _inspect_file(part_path, filing)
+
+
 def _transient_status(exc: Exception) -> Optional[int]:
     if isinstance(exc, urllib.error.HTTPError):
         return exc.code if exc.code in TRANSIENT_HTTP_STATUS else None
     if isinstance(exc, _HTTPStatusError):
         return exc.status if exc.status in TRANSIENT_HTTP_STATUS else None
+    if isinstance(exc, _CurlTransferError):
+        return 0
     if isinstance(
         exc,
         (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException),
@@ -385,7 +446,9 @@ def recover_one(
     limiter: RateLimiter,
     max_attempts: int,
     timeout: float,
+    transport: str = "urllib",
     opener: Callable[..., Any] = urllib.request.urlopen,
+    curl_runner: Callable[..., Any] = subprocess.run,
 ) -> tuple[FileRecord, bool]:
     """Return the verified file record and whether an existing file was resumed."""
     destination = destination_for(download_dir, filing)
@@ -410,13 +473,24 @@ def recover_one(
     for attempt in range(1, max_attempts + 1):
         limiter.wait()
         try:
-            record = _download_attempt(
-                filing,
-                part_path,
-                user_agent=user_agent,
-                timeout=timeout,
-                opener=opener,
-            )
+            if transport == "urllib":
+                record = _download_attempt(
+                    filing,
+                    part_path,
+                    user_agent=user_agent,
+                    timeout=timeout,
+                    opener=opener,
+                )
+            elif transport == "curl":
+                record = _curl_download_attempt(
+                    filing,
+                    part_path,
+                    user_agent=user_agent,
+                    timeout=timeout,
+                    runner=curl_runner,
+                )
+            else:
+                raise RecoveryError(f"unsupported transport: {transport}")
             if destination.exists() or destination.is_symlink():
                 raise RecoveryError(f"destination appeared during download: {destination}")
             os.replace(part_path, destination)
@@ -471,7 +545,9 @@ def recover_manifest(
     max_rps: float = 10,
     max_attempts: int = 3,
     timeout: float = 30,
+    transport: str = "urllib",
     opener: Callable[..., Any] = urllib.request.urlopen,
+    curl_runner: Callable[..., Any] = subprocess.run,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
     progress: Optional[Callable[[int, int, int], None]] = None,
@@ -484,6 +560,8 @@ def recover_manifest(
         raise RecoveryError(f"--max-attempts must be between 1 and {MAX_ATTEMPTS_LIMIT}")
     if timeout <= 0:
         raise RecoveryError("--timeout must be greater than 0")
+    if transport not in {"urllib", "curl"}:
+        raise RecoveryError("--transport must be urllib or curl")
     resolved_download = validate_download_dir(download_dir)
     manifest_digest, filings = load_manifest(manifest_path)
     limiter = RateLimiter(max_rps, clock=clock, sleep=sleep)
@@ -498,7 +576,9 @@ def recover_manifest(
             limiter=limiter,
             max_attempts=max_attempts,
             timeout=timeout,
+            transport=transport,
             opener=opener,
+            curl_runner=curl_runner,
         )
         records.append(record)
         resumed += int(was_resumed)
@@ -517,6 +597,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max-rps", type=float, default=10)
     parser.add_argument("--max-attempts", type=int, default=3)
     parser.add_argument("--timeout", type=float, default=30)
+    parser.add_argument("--transport", choices=("urllib", "curl"), default="urllib")
     return parser.parse_args(argv)
 
 
@@ -540,6 +621,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             max_rps=args.max_rps,
             max_attempts=args.max_attempts,
             timeout=args.timeout,
+            transport=args.transport,
             progress=show_progress,
         )
     except (RecoveryError, OSError) as exc:

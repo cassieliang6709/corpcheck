@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import subprocess
 import urllib.error
 from pathlib import Path
 
@@ -234,6 +235,91 @@ def test_transient_error_retries_with_rate_limit_then_succeeds(tmp_path) -> None
     assert report["file_count"] == 1
     assert len(attempts) == 2
     assert sleeps == [pytest.approx(0.1)]
+
+
+def test_curl_transport_is_atomic_https_only_and_validated(tmp_path) -> None:
+    manifest, _ = manifest_file(tmp_path)
+    download_dir = tmp_path / "isolated"
+    destination = recovery.destination_for(download_dir.resolve(), spec())
+    commands = []
+
+    def runner(command, **options):
+        commands.append((command, options))
+        part_path = Path(command[command.index("--output") + 1])
+        assert part_path.name.endswith(".part")
+        assert not destination.exists()
+        part_path.write_bytes(submission())
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    report, resumed = recovery.recover_manifest(
+        manifest,
+        download_dir,
+        tmp_path / "report.json",
+        user_agent=REAL_USER_AGENT,
+        transport="curl",
+        curl_runner=runner,
+        opener=lambda *_args, **_kwargs: pytest.fail("urllib must not run"),
+    )
+
+    assert resumed == 0
+    assert report["file_count"] == 1
+    assert destination.read_bytes() == submission()
+    command, options = commands[0]
+    assert command[0] == "curl"
+    assert command[1] == "--disable"
+    assert "--insecure" not in command
+    assert command[command.index("--proto") + 1] == "=https"
+    assert command[command.index("--proto-redir") + 1] == "=https"
+    assert command[command.index("--user-agent") + 1] == REAL_USER_AGENT
+    assert options == {"capture_output": True, "text": True, "check": False}
+
+
+def test_curl_transport_retries_and_removes_partial_file(tmp_path) -> None:
+    manifest, _ = manifest_file(tmp_path)
+    download_dir = tmp_path / "isolated"
+    attempts = []
+    sleeps = []
+
+    def runner(command, **_options):
+        part_path = Path(command[command.index("--output") + 1])
+        attempts.append(part_path)
+        if len(attempts) == 1:
+            part_path.write_bytes(b"partial")
+            return subprocess.CompletedProcess(command, 35, "", "tls failed")
+        assert not part_path.exists()
+        part_path.write_bytes(submission())
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    report, _ = recovery.recover_manifest(
+        manifest,
+        download_dir,
+        tmp_path / "report.json",
+        user_agent=REAL_USER_AGENT,
+        transport="curl",
+        curl_runner=runner,
+        clock=lambda: 0.0,
+        sleep=sleeps.append,
+    )
+
+    assert report["file_count"] == 1
+    assert len(attempts) == 2
+    assert sleeps == [pytest.approx(0.1)]
+
+
+def test_unknown_transport_fails_before_writing(tmp_path) -> None:
+    manifest, _ = manifest_file(tmp_path)
+    download_dir = tmp_path / "isolated"
+
+    with pytest.raises(recovery.RecoveryError, match="--transport"):
+        recovery.recover_manifest(
+            manifest,
+            download_dir,
+            tmp_path / "report.json",
+            user_agent=REAL_USER_AGENT,
+            transport="other",
+        )
+
+    assert not download_dir.exists()
 
 
 def test_permanent_error_does_not_retry_or_leave_partial_output(tmp_path) -> None:

@@ -439,13 +439,18 @@ tuning.
    .venv/bin/python -m evaluation.recover_sec_submissions \
      --manifest evaluation/runs/R11_table_representation/sec_corpus_manifest.json \
      --download-dir "$CORPCHECK_SEC_RECOVERY_DIR" \
-     --report evaluation/runs/R11_table_representation/sec_recovery_report.json
+     --report evaluation/runs/R11_table_representation/sec_recovery_report.json \
+     --transport curl
    ```
 
    Use a real contact address locally; never commit it. Existing files are
    resumed only after their accession, CIK, form, filing date, and period of
    report match the frozen manifest. Invalid collisions and partial recovery
-   leave the final report unwritten.
+   leave the final report unwritten. The default transport is Python `urllib`;
+   `--transport curl` is the verified fallback for Python/OpenSSL environments
+   that receive a TLS EOF from the SEC CDN. It keeps certificate verification,
+   HTTPS-only redirects, atomic writes, bounded retries, and the same exact
+   header/hash checks.
 
    The post-recovery reprocessor is implemented and unit-tested, but has not
    mutated a live corpus. An audit found that the historical database lacks raw
