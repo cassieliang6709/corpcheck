@@ -44,6 +44,11 @@ from evaluation.reprocess_checkpoint import (
     create_checkpoint,
     write_final_report,
 )
+from evaluation.table_representation_profiles import (
+    REPRESENTATION_PROFILES,
+    cleaner_for_profile,
+    profile_source_fingerprint,
+)
 
 REPORT_KEYS = {
     "schema_version",
@@ -536,12 +541,6 @@ def validate_filing_target(submission: VerifiedSubmission, target: FilingTarget)
         )
 
 
-def _default_cleaner_factory(form: str) -> Any:
-    from corpcheck.ingestion.processors.html_cleaner import HTMLCleaner
-
-    return HTMLCleaner(form)
-
-
 def _default_chunker() -> Any:
     from corpcheck.ingestion.processors.chunker import Chunker
 
@@ -558,7 +557,8 @@ def process_one_submission(
     submission: VerifiedSubmission,
     target: FilingTarget,
     *,
-    cleaner_factory: Callable[[str], Any] = _default_cleaner_factory,
+    representation_profile: str,
+    cleaner_factory: Optional[Callable[[str], Any]] = None,
     chunker: Any = None,
     embedder: Any = None,
 ) -> list[dict[str, Any]]:
@@ -567,6 +567,11 @@ def process_one_submission(
     This function performs no database writes and no discovery or download calls.
     Callers must atomically replace the target filing only after it returns.
     """
+    if representation_profile not in REPRESENTATION_PROFILES:
+        raise ReprocessInputError(
+            "representation profile must be one of: "
+            + ", ".join(REPRESENTATION_PROFILES)
+        )
     validate_filing_target(submission, target)
     digest, size = _hash_regular_file(submission.path)
     if digest != submission.sha256 or size != submission.size:
@@ -574,7 +579,14 @@ def process_one_submission(
             f"{submission.filing.accession} raw submission changed after input validation"
         )
 
-    cleaner = cleaner_factory(submission.filing.form)
+    try:
+        cleaner = (
+            cleaner_factory(submission.filing.form)
+            if cleaner_factory is not None
+            else cleaner_for_profile(representation_profile, submission.filing.form)
+        )
+    except ValueError as exc:
+        raise ReprocessInputError(str(exc)) from exc
     segments = cleaner.clean_segments(submission.path)
     if not segments:
         raise ReprocessInputError(
@@ -659,6 +671,7 @@ def processing_source_fingerprint() -> str:
     root = Path(__file__).resolve().parents[1]
     relative_paths = (
         "evaluation/reprocess_sec_corpus.py",
+        "evaluation/table_representation_profiles.py",
         "src/corpcheck/ingestion/chunk_features.py",
         "src/corpcheck/ingestion/config.py",
         "src/corpcheck/ingestion/loaders/db_loader.py",
@@ -789,6 +802,7 @@ def _assert_record(
 def _run_contract(
     inputs: ReprocessingInputs,
     preflight: DatabasePreflight,
+    representation_profile: str,
 ) -> RunContract:
     return RunContract(
         old_database_name=preflight.old.database_name,
@@ -796,6 +810,10 @@ def _run_contract(
         manifest_sha256=inputs.manifest_payload_sha256,
         recovery_report_sha256=_sha256_file(inputs.recovery_report_path),
         cleaner_source_sha256=processing_source_fingerprint(),
+        representation_profile=representation_profile,
+        profile_source_fingerprint=profile_source_fingerprint(
+            representation_profile
+        ),
         embedding_model=EMBEDDING_MODEL,
         embedding_dimension=EMBEDDING_DIMENSION,
         expected_accessions=tuple(
@@ -813,11 +831,18 @@ def run_reprocessing(
     recovery_root: Path,
     checkpoint_path: Path,
     output_path: Path,
+    representation_profile: str,
     connect: Callable[[str], Any] = psycopg2.connect,
     loader_factory: Callable[..., Any] = DBLoader,
-    processor: Callable[..., list[dict[str, Any]]] = process_one_submission,
+    processor: Optional[Callable[..., list[dict[str, Any]]]] = None,
 ) -> dict[str, Any]:
     """Reprocess the exact verified accession set, aborting on the first error."""
+    if representation_profile not in REPRESENTATION_PROFILES:
+        raise ReprocessInputError(
+            "representation profile must be one of: "
+            + ", ".join(REPRESENTATION_PROFILES)
+        )
+    active_processor = processor or process_one_submission
     old_endpoint, new_endpoint = validate_database_pair(
         old_database_url, new_database_url
     )
@@ -837,7 +862,7 @@ def run_reprocessing(
                 old_endpoint=old_endpoint,
                 new_endpoint=new_endpoint,
             )
-            contract = _run_contract(inputs, initial)
+            contract = _run_contract(inputs, initial, representation_profile)
             state = create_checkpoint(checkpoint_path, contract)
             targets = _targets_by_accession(new_connection, inputs.submissions)
             records = {record.accession: record for record in state.records}
@@ -862,7 +887,11 @@ def run_reprocessing(
                         raise ReprocessInputError(
                             f"{accession} pending filing is not an untouched baseline clone"
                         )
-                    rows = processor(submission, target)
+                    rows = active_processor(
+                        submission,
+                        target,
+                        representation_profile=representation_profile,
+                    )
                     loader.replace_filing_chunks_atomic(target.filing_id, rows)
                     stored = _chunk_snapshot(new_connection, target.filing_id)
                     if stored.count != len(rows):
@@ -911,6 +940,11 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--recovery-root", required=True, type=Path)
     parser.add_argument("--checkpoint", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--representation-profile",
+        required=True,
+        choices=REPRESENTATION_PROFILES,
+    )
     return parser.parse_args(argv)
 
 
@@ -925,6 +959,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             recovery_root=args.recovery_root,
             checkpoint_path=args.checkpoint,
             output_path=args.output,
+            representation_profile=args.representation_profile,
         )
     except (ReprocessInputError, CheckpointError, psycopg2.Error) as exc:
         print(f"Reprocessing failed: {exc}", file=sys.stderr)

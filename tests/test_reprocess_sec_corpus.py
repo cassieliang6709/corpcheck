@@ -406,6 +406,7 @@ def test_process_one_submission_builds_contiguous_fully_embedded_rows(tmp_path) 
     rows = reprocessor.process_one_submission(
         submission,
         target,
+        representation_profile="candidate",
         cleaner_factory=lambda form: cleaner,
         chunker=FakeChunker(payloads),
         embedder=embedder,
@@ -464,6 +465,7 @@ def test_process_one_submission_fails_closed(tmp_path, failure, message) -> None
         reprocessor.process_one_submission(
             submission,
             target,
+            representation_profile="candidate",
             cleaner_factory=lambda form: FakeCleaner(segments),
             chunker=FakeChunker(payloads),
             embedder=FakeEmbedder(embeddings),
@@ -478,6 +480,7 @@ def test_process_one_submission_rehashes_raw_file_before_work(tmp_path) -> None:
         reprocessor.process_one_submission(
             submission,
             target,
+            representation_profile="candidate",
             cleaner_factory=lambda form: pytest.fail("cleaner must not run"),
         )
 
@@ -487,6 +490,35 @@ def test_processing_source_fingerprint_is_stable_sha256() -> None:
     assert first == reprocessor.processing_source_fingerprint()
     assert len(first) == 64
     int(first, 16)
+
+
+def test_cli_requires_a_known_representation_profile() -> None:
+    base = [
+        "--old-database-url",
+        "postgresql://db/old",
+        "--new-database-url",
+        "postgresql://db/new",
+        "--manifest",
+        "manifest.json",
+        "--recovery-report",
+        "recovery.json",
+        "--recovery-root",
+        "raw",
+        "--checkpoint",
+        "checkpoint.jsonl",
+        "--output",
+        "report.json",
+    ]
+
+    with pytest.raises(SystemExit):
+        reprocessor.parse_args(base)
+    with pytest.raises(SystemExit):
+        reprocessor.parse_args(base + ["--representation-profile", "unknown"])
+
+    args = reprocessor.parse_args(
+        base + ["--representation-profile", "candidate"]
+    )
+    assert args.representation_profile == "candidate"
 
 
 class OrchestrationConnection:
@@ -570,9 +602,10 @@ def _orchestration_fixture(tmp_path, monkeypatch):
         "recovery_root": root,
         "checkpoint_path": tmp_path / "checkpoint.jsonl",
         "output_path": tmp_path / "final.json",
+        "representation_profile": "candidate",
         "connect": lambda _url: old,
         "loader_factory": lambda **_kwargs: OrchestrationLoader(new, events),
-        "processor": lambda *_: [{"chunk_index": 0}],
+        "processor": lambda *_args, **_kwargs: [{"chunk_index": 0}],
     }
     return kwargs, old, new, events, filing.accession
 
@@ -588,6 +621,7 @@ def test_run_reprocessing_fresh_one_item_commits_and_reports(
 
     assert report["records"][0]["accession"] == accession
     assert report["records"][0]["chunk_sha256"] == "b" * 64
+    assert report["contract"]["representation_profile"] == "candidate"
     assert old.session == {
         "isolation_level": "REPEATABLE READ",
         "readonly": True,
@@ -595,6 +629,27 @@ def test_run_reprocessing_fresh_one_item_commits_and_reports(
     }
     assert old.closed is True
     assert events.count("commit") == 1
+
+
+def test_run_reprocessing_passes_the_bound_profile_to_processor(
+    tmp_path, monkeypatch
+) -> None:
+    kwargs, _old, _new, _events, _accession = _orchestration_fixture(
+        tmp_path, monkeypatch
+    )
+    seen: list[str] = []
+
+    def processor(*_args, representation_profile):
+        seen.append(representation_profile)
+        return [{"chunk_index": 0}]
+
+    kwargs["representation_profile"] = "baseline"
+    kwargs["processor"] = processor
+
+    report = reprocessor.run_reprocessing(**kwargs)
+
+    assert seen == ["baseline"]
+    assert report["contract"]["representation_profile"] == "baseline"
 
 
 def test_run_reprocessing_resume_skips_only_after_database_verification(
@@ -606,13 +661,44 @@ def test_run_reprocessing_resume_skips_only_after_database_verification(
     reprocessor.run_reprocessing(**kwargs)
     Path(kwargs["output_path"]).unlink()
     events.clear()
-    kwargs["processor"] = lambda *_: pytest.fail("completed filing must be skipped")
+    kwargs["processor"] = lambda *_args, **_kwargs: pytest.fail(
+        "completed filing must be skipped"
+    )
 
     reprocessor.run_reprocessing(**kwargs)
 
     assert "commit" not in events
     assert events.count("snapshot-new") >= 2
     assert new.snapshots[41].sha256 == "b" * 64
+
+
+def test_run_reprocessing_rejects_unknown_profile_before_connect(
+    tmp_path, monkeypatch
+) -> None:
+    kwargs, _old, _new, _events, _accession = _orchestration_fixture(
+        tmp_path, monkeypatch
+    )
+    kwargs["representation_profile"] = "unknown"
+    kwargs["connect"] = lambda _url: pytest.fail("invalid profile must fail before connect")
+
+    with pytest.raises(reprocessor.ReprocessInputError, match="representation profile"):
+        reprocessor.run_reprocessing(**kwargs)
+
+    assert not Path(kwargs["checkpoint_path"]).exists()
+
+
+def test_resume_rejects_a_different_representation_profile(
+    tmp_path, monkeypatch
+) -> None:
+    kwargs, _old, _new, _events, _accession = _orchestration_fixture(
+        tmp_path, monkeypatch
+    )
+    reprocessor.run_reprocessing(**kwargs)
+    Path(kwargs["output_path"]).unlink()
+    kwargs["representation_profile"] = "baseline"
+
+    with pytest.raises(reprocessor.CheckpointError, match="different run contract"):
+        reprocessor.run_reprocessing(**kwargs)
 
 
 def test_run_reprocessing_rejects_resume_after_commit_before_checkpoint(

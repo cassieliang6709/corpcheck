@@ -20,6 +20,8 @@ def contract() -> checkpoint.RunContract:
         manifest_sha256=SHA_A,
         recovery_report_sha256=SHA_B,
         cleaner_source_sha256=SHA_C,
+        representation_profile="candidate",
+        profile_source_fingerprint=SHA_A,
         embedding_model="BAAI/bge-small-en-v1.5",
         embedding_dimension=384,
         expected_accessions=(ACCESSION_A, ACCESSION_B),
@@ -91,6 +93,9 @@ def test_create_is_idempotent_only_for_the_same_contract(tmp_path) -> None:
             "plain database name",
         ),
         ({"manifest_sha256": "A" * 64}, "lowercase SHA-256"),
+        ({"representation_profile": "Candidate"}, "canonical identifier"),
+        ({"representation_profile": "../candidate"}, "canonical identifier"),
+        ({"profile_source_fingerprint": "A" * 64}, "lowercase SHA-256"),
         ({"embedding_dimension": True}, "positive integer"),
         ({"expected_accessions": (ACCESSION_B, ACCESSION_A)}, "unique and sorted"),
         ({"expected_accessions": (ACCESSION_A, ACCESSION_A)}, "unique and sorted"),
@@ -120,6 +125,28 @@ def test_load_rejects_tampered_payload_even_when_json_is_valid(tmp_path) -> None
     path.write_text(content.replace('"chunk_count":12', '"chunk_count":13'))
 
     with pytest.raises(checkpoint.CheckpointError, match="digest mismatch"):
+        checkpoint.load_checkpoint(path)
+
+
+def test_load_rejects_legacy_v1_checkpoint_without_profile_binding(tmp_path) -> None:
+    path = tmp_path / "checkpoint.jsonl"
+    legacy_contract = dataclasses.asdict(contract())
+    legacy_contract.pop("representation_profile")
+    legacy_contract.pop("profile_source_fingerprint")
+    legacy_contract["expected_accessions"] = list(
+        legacy_contract["expected_accessions"]
+    )
+    path.write_bytes(
+        checkpoint._entry_line(
+            {
+                "contract": legacy_contract,
+                "kind": "header",
+                "schema_version": 1,
+            }
+        )
+    )
+
+    with pytest.raises(checkpoint.CheckpointError, match="unsupported header"):
         checkpoint.load_checkpoint(path)
 
 

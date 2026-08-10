@@ -12,10 +12,11 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 ACCESSION_RE = re.compile(r"^\d{10}-\d{2}-\d{6}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DATABASE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+PROFILE_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 
 
 class CheckpointError(RuntimeError):
@@ -29,6 +30,8 @@ class RunContract:
     manifest_sha256: str
     recovery_report_sha256: str
     cleaner_source_sha256: str
+    representation_profile: str
+    profile_source_fingerprint: str
     embedding_model: str
     embedding_dimension: int
     expected_accessions: tuple[str, ...]
@@ -41,6 +44,17 @@ class RunContract:
         _validate_sha256(self.manifest_sha256, "manifest digest")
         _validate_sha256(self.recovery_report_sha256, "recovery report digest")
         _validate_sha256(self.cleaner_source_sha256, "cleaner source fingerprint")
+        if (
+            not isinstance(self.representation_profile, str)
+            or PROFILE_RE.fullmatch(self.representation_profile) is None
+        ):
+            raise CheckpointError(
+                "representation profile must be a lowercase canonical identifier"
+            )
+        _validate_sha256(
+            self.profile_source_fingerprint,
+            "representation profile source fingerprint",
+        )
         _validate_name(self.embedding_model, "embedding model")
         if (
             isinstance(self.embedding_dimension, bool)
@@ -226,6 +240,8 @@ def _contract_from_payload(value: Any) -> RunContract:
         manifest_sha256=value["manifest_sha256"],
         recovery_report_sha256=value["recovery_report_sha256"],
         cleaner_source_sha256=value["cleaner_source_sha256"],
+        representation_profile=value["representation_profile"],
+        profile_source_fingerprint=value["profile_source_fingerprint"],
         embedding_model=value["embedding_model"],
         embedding_dimension=value["embedding_dimension"],
         expected_accessions=tuple(accessions),

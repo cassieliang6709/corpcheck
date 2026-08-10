@@ -448,19 +448,30 @@ tuning.
    leave the final report unwritten.
 
    The post-recovery reprocessor is implemented and unit-tested, but has not
-   mutated a live corpus. It verifies the exact manifest/report/raw-file set,
-   compares full company and filing identities on same-server old/new
-   databases, and holds the old database in a read-only repeatable-read
-   transaction. Before replacing each pending filing, it requires the new
-   filing's canonical chunk digest to match the untouched old baseline. It then
+   mutated a live corpus. An audit found that the historical database lacks raw
+   file and selected-component hashes, so it is no longer treated as a matched
+   experimental baseline: equal accessions alone cannot prove that its old
+   largest-HTML discovery consumed the same bytes as the full-submission
+   reprocessor. Instead, create two fresh clones of the same reference database
+   and rebuild both from the frozen full-submission set. The `baseline` profile
+   reproduces the four table methods immediately before commit `97c9fed`; the
+   `candidate` profile uses the current semantic-title and `<td>`-header logic.
+
+   The reprocessor verifies the exact manifest/report/raw-file set, compares
+   full company and filing identities on same-server reference/target databases,
+   and holds the reference database in a read-only repeatable-read transaction.
+   Before replacing each pending filing, it requires the target filing's
+   canonical chunk digest to match the untouched reference. It then
    converts the verified submission into complete offline
    cleaner/chunker/embedder rows, replaces that filing's chunks in one
    transaction, reads the committed rows back, and only then appends a
    hash-chained, fsynced checkpoint. Completed filings are skipped on resume only
    after both the raw file and stored chunk digest still match their checkpoint.
    The contract binds the database names, manifest and recovery-report digests,
-   processing-source fingerprint, embedding configuration, and exact accession
-   set. A crash in the narrow database-commit-before-checkpoint window fails
+   processing-source fingerprint, explicit representation profile and profile
+   fingerprint, embedding configuration, and exact accession set. Checkpoint
+   schema v1 is rejected because it cannot prove which profile ran. A crash in
+   the narrow database-commit-before-checkpoint window fails
    closed on restart; restore a fresh clone instead of guessing that the
    uncheckpointed write is valid. The current clone passed the read-only
    preflight at 50 companies and 1,662 filings with matching identity SHA-256
@@ -468,23 +479,34 @@ tuning.
 
    ```bash
    .venv/bin/python -m evaluation.reprocess_sec_corpus \
-     --old-database-url "$CORPCHECK_OLD_DATABASE_URL" \
-     --new-database-url "$CORPCHECK_NEW_DATABASE_URL" \
+     --old-database-url "$CORPCHECK_REFERENCE_DATABASE_URL" \
+     --new-database-url "$CORPCHECK_BASELINE_DATABASE_URL" \
      --manifest evaluation/runs/R11_table_representation/sec_corpus_manifest.json \
      --recovery-report evaluation/runs/R11_table_representation/sec_recovery_report.json \
      --recovery-root "$CORPCHECK_SEC_RECOVERY_DIR" \
-     --checkpoint evaluation/runs/R11_table_representation/reprocess_checkpoint.jsonl \
-     --output evaluation/runs/R11_table_representation/reprocess_report.json
+     --representation-profile baseline \
+     --checkpoint evaluation/runs/R11_table_representation/baseline_checkpoint.jsonl \
+     --output evaluation/runs/R11_table_representation/baseline_reprocess_report.json
+
+   .venv/bin/python -m evaluation.reprocess_sec_corpus \
+     --old-database-url "$CORPCHECK_REFERENCE_DATABASE_URL" \
+     --new-database-url "$CORPCHECK_CANDIDATE_DATABASE_URL" \
+     --manifest evaluation/runs/R11_table_representation/sec_corpus_manifest.json \
+     --recovery-report evaluation/runs/R11_table_representation/sec_recovery_report.json \
+     --recovery-root "$CORPCHECK_SEC_RECOVERY_DIR" \
+     --representation-profile candidate \
+     --checkpoint evaluation/runs/R11_table_representation/candidate_checkpoint.jsonl \
+     --output evaluation/runs/R11_table_representation/candidate_reprocess_report.json
    ```
 
    Live reprocessing remains gated on the complete 1,662-file raw recovery
    report; no SEC download or corpus write has been performed by this work.
 
    ```bash
-   .venv/bin/python -m evaluation.paired_retrieval_gate \
+     .venv/bin/python -m evaluation.paired_retrieval_gate \
      --gate-profile development \
-     --old-db-url "$CORPCHECK_OLD_DATABASE_URL" \
-     --new-db-url "$CORPCHECK_NEW_DATABASE_URL" \
+     --old-db-url "$CORPCHECK_BASELINE_DATABASE_URL" \
+     --new-db-url "$CORPCHECK_CANDIDATE_DATABASE_URL" \
      --dataset evaluation/datasets/financebench_filtered.json \
      --output evaluation/runs/R11_table_representation/dev_paired_gate.json
    ```
@@ -539,10 +561,10 @@ In execution order, the next step is to set `SEC_USER_AGENT` locally to a
 two-token product/contact value containing a real email address, then download
 and lock the 1,521 missing raw SEC submissions in the isolated recovery
 directory. After that: run the AMZN/Nike representation check in isolation;
-rebuild the full 1,662-filing development corpus with the checkpointed
-reprocessor rather than changing only benchmark-gold filings; run the paired
+rebuild full 1,662-filing baseline and candidate corpora from the same frozen
+submissions rather than changing only benchmark-gold filings; run the paired
 development gate; and proceed only if every measured round reaches strict
-Recall@10 >= 0.2500 without regressing against the old corpus. An accepted
+Recall@10 >= 0.2500 without regressing against the rebuilt baseline. An accepted
 development report unlocks the one-time matched held-out evaluation. CVS FY2018
 and GameStop 10-K/10-K/A remain separate coverage/governance validations. Only
 after those retrieval checks pass do we rerun the 34-answer benchmark and decide

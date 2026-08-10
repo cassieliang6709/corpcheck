@@ -56,14 +56,34 @@ runnable: the 45 filings still need to be added to an isolated corpus. The 21
 issuer mappings are available for explicit ingestion but remain outside the
 default 50-company universe.
 
-This requirements manifest is not yet safe to drive downloads. Before corpus
-construction, each document must be enriched and frozen with its canonical
-ticker, CIK, exact accession, filed date, period of report, selected SEC raw
-component, and SHA-256. The ingestion runner must reject missing, extra,
-amended, or mismatched filings and prove that both representations consume the
-same immutable raw-file set. This is especially important for delisted ATVI,
-historical Square filings now resolved through Block/XYZ, and the eight selected
-documents earlier than the default 2018 start year.
+This requirements manifest is not yet safe to drive downloads. Resolution must
+use a versioned 21-issuer CIK lock, merge the SEC submissions `recent` and
+historical-file arrays, accept exact `10-K` only, and confirm the requested
+fiscal year through `dei.DocumentFiscalYearFocus`. This avoids guessing from
+`reportDate.year`, which is wrong for some January/February retail fiscal years.
+Missing or ambiguous confirmation fails unless the document has an explicit
+reviewed accession lock. The historical edge locks are ATVI FY2019
+`0000718877-20-000003`, Block FY2016 `0001628280-17-001754`, and Block FY2020
+`0001512673-21-000008`; an accession prefix is not required to equal the
+registrant CIK.
+
+Each resolved document must freeze canonical ticker, CIK, exact accession,
+filed date, period of report, fiscal-year end, archive URLs, and the exact
+`full-submission.txt` SHA-256 and size. It must also freeze the ordered SGML
+`<DOCUMENT>` components actually selected by the cleaner: ordinal, `TYPE`,
+`FILENAME`, role, text SHA-256, and size, plus the selector/source fingerprint.
+The current downloader's “largest HTML” heuristic is not part of this contract:
+metadata comes from the full submission, and largest HTML is neither necessarily
+the primary filing nor a stable tie-break. Missing, extra, amended, mismatched,
+unsafe-path, or hash-drifted files fail closed.
+
+The historical development database also lacks raw/component hashes, so it is
+an identity reference rather than a proven matched representation baseline.
+Both development and held-out gates must rebuild `baseline` (the four table
+methods before `97c9fed`) and `candidate` from the same immutable full-submission
+and selected-component byte set. Their run contracts bind distinct profile
+fingerprints and a shared raw manifest, chunker, embedding model, and dimension.
+Only those rebuilt databases may be compared by the paired gate.
 
 ## Acceptance gates
 
