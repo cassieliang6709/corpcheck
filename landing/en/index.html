@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CorpCheck — Evidence before answers</title>
+  <meta name="description" content="CorpCheck checks whether SEC filings contain strong, traceable evidence before an answer can be generated.">
+  <link rel="canonical" href="https://corpcheck.liangyue.site/en/">
+  <link rel="alternate" hreflang="zh-CN" href="https://corpcheck.liangyue.site/">
+  <link rel="alternate" hreflang="en" href="https://corpcheck.liangyue.site/en/">
+  <link rel="alternate" hreflang="x-default" href="https://corpcheck.liangyue.site/">
+  <meta property="og:title" content="CorpCheck — Evidence before answers">
+  <meta property="og:description" content="Verifiable retrieval over SEC filings, with deterministic refusal before generation.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://corpcheck.liangyue.site/en/">
+  <meta name="twitter:card" content="summary">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/config.js"></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <nav aria-label="Main navigation"><div class="wrap nav-inner"><a class="brand" href="/en/">Corp<span>Check</span></a><div class="nav-links"><a href="#demo-console">Demo</a><a href="#how">Method</a><a href="https://github.com/cassieliang6709/corpcheck" target="_blank" rel="noopener">GitHub</a><a class="lang" href="/" lang="zh-CN" hreflang="zh-CN">中文</a></div></div></nav>
+  <main>
+    <header class="hero">
+      <div class="wrap hero-grid">
+        <div><p class="eyebrow">Evidence infrastructure for financial disclosure</p><h1>Do not generate first.<br><em>Prove the evidence is enough.</em></h1><p class="lede">Before answering a financial question, CorpCheck retrieves SEC filings, measures evidence strength, and preserves company, fiscal year, filing type, and source provenance. If the evidence is weak, it stops before an LLM is contacted.</p><div class="btn-row"><a class="btn btn-primary" href="#demo-console">Try the evidence check</a><a class="btn" href="https://github.com/cassieliang6709/corpcheck" target="_blank" rel="noopener">View source ↗</a></div></div>
+        <aside class="hero-proof" aria-label="Current product boundary"><p class="proof-label">CURRENT PRODUCT BOUNDARY</p><p class="proof-title">Retrieval-only demo</p><p>The public experience shows retrieval, evidence gating, and provenance. Answer generation stays closed until the matched-corpus rebuild and retrieval gates pass.</p><div class="proof-row"><span>LLM consulted</span><strong>No</strong></div><div class="proof-row"><span>Evidence source</span><strong>SEC filings</strong></div></aside>
+      </div>
+      <div class="wrap stats" aria-label="Current indexed corpus snapshot"><div class="stat"><b>469,874</b><span>indexed chunks</span></div><div class="stat"><b>1,662</b><span>10-K / 10-Q filings</span></div><div class="stat"><b>50</b><span>companies</span></div><div class="stat"><b>2018–2025</b><span>fiscal coverage</span></div></div>
+      <p class="wrap snapshot-note">These figures describe the current runnable snapshot; they do not imply that the corpus now being rebuilt has passed evaluation.</p>
+    </header>
+
+    <section id="demo-console" class="demo-section"><div class="wrap"><p class="eyebrow">Evidence Console</p><h2>First ask: is there enough evidence?</h2><p class="section-intro">Choose a scenario or enter a question. The page calls <code>/answerability</code>; it does not generate an answer or contact an LLM.</p>
+      <div class="console-shell">
+        <form id="evidence-form" class="query-panel"><fieldset><legend>Quick scenarios</legend><div class="presets"><button type="button" class="preset active" data-query="What was Apple's total net sales in fiscal 2022?">Apple FY2022 · supported</button><button type="button" class="preset" data-query="What is the best recipe for sourdough bread?">Out of domain · refuse</button><button type="button" class="preset" data-query="What was OpenAI's revenue in fiscal 2023?">Unknown issuer · refuse</button></div></fieldset><label for="query">Financial question</label><textarea id="query" name="query" rows="3" required>What was Apple's total net sales in fiscal 2022?</textarea><button class="btn btn-primary check-btn" type="submit">Check evidence <span aria-hidden="true">→</span></button><p class="loading-note">The local API warms the embedding model at startup; ready-state queries can still take a few seconds.</p></form>
+        <div class="result-panel" id="result-panel" aria-live="polite" aria-busy="false"><div id="result-empty" class="result-empty"><span class="radar" aria-hidden="true"></span><p>Select a question and check its evidence.</p></div><div id="result-loading" class="result-loading" hidden><span class="spinner" aria-hidden="true"></span><div><strong>Searching SEC filings…</strong><p>Measuring evidence coverage and both confidence floors.</p></div></div><div id="result-content" hidden></div></div>
+      </div><p id="demo-mode" class="demo-mode"></p>
+    </div></section>
+
+    <section id="how"><div class="wrap"><p class="eyebrow">Why this is not generic RAG</p><h2>Three promises that can be tested</h2><div class="cards"><article class="card"><span>01</span><h3>Evaluation constrains retrieval</h3><p>The serving API and FinanceBench evaluation call the same <code>retrieve()</code>. Strict Recall@10 is currently 0.1429, so generation remains closed instead of being marketed as reliable.</p></article><article class="card"><span>02</span><h3>Every result is traceable</h3><p>The web result retains ticker, filing type, fiscal year, filed date, and a direct SEC link; MCP filing context also returns the accession number.</p></article><article class="card"><span>03</span><h3>Refusal happens before the LLM</h3><p>Top-1 cosine must reach 0.42 and mean top-3 must reach 0.40. Missing either floor prevents weak evidence from reaching a generator.</p></article></div></div></section>
+
+    <section class="boundary"><div class="wrap boundary-grid"><div><p class="eyebrow">Verified now</p><h2>Ready to demonstrate</h2><ul><li>Hybrid retrieval and source evidence</li><li>Deterministic answerability gate</li><li>Current 1,662-filing / 469,874-chunk snapshot</li><li>A shared retrieval path for HTTP and MCP</li></ul></div><div><p class="eyebrow muted">After evaluation</p><h2>Still deliberately gated</h2><ul><li>Generated financial answers</li><li>A new 34-answer accuracy claim</li><li>Improvement claims from the rebuilt corpus</li><li>An unrestricted public interactive service</li></ul></div></div></section>
+
+    <section class="cta-section"><div class="wrap cta-box"><div><p class="eyebrow">Go deeper</p><h2>Want the evaluation method or architecture walkthrough?</h2><p>I can unpack corpus governance, retrieval failure analysis, and why experiments that missed their gates were rejected.</p></div><div class="btn-row"><a class="btn btn-primary" href="mailto:liang.yue@northeastern.edu?subject=CorpCheck%20demo">Book a walkthrough</a><a class="btn" href="https://github.com/cassieliang6709/corpcheck" target="_blank" rel="noopener">GitHub ↗</a></div></div></section>
+  </main>
+  <footer><div class="wrap"><span>CorpCheck · Evidence before answers.</span><span>Generation backend: optional, currently disabled in this demo.</span></div></footer>
+</body>
+</html>

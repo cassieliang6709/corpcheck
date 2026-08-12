@@ -47,6 +47,10 @@ Thumbs.db
 evaluation/runs/
 evaluation/runs/*/queries.jsonl
 docker/financial_rag.dump
+.playwright-cli/
+output/playwright/
 
 # The *.html rule above targets downloaded SEC filings, not the landing page.
 !landing/*.html
+!landing/en/
+!landing/en/*.html

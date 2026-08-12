@@ -12,6 +12,10 @@ from corpcheck import settings as config
 from corpcheck.db import close_pool, get_pool
 from corpcheck.llm.chat import chat_once, stream_chat
 from corpcheck.models import (
+    AnswerabilityCoverage,
+    AnswerabilityRequest,
+    AnswerabilityResponse,
+    AnswerabilitySimilarity,
     ChatRequest,
     ChatResponse,
     FilterOptionsResponse,
@@ -20,6 +24,7 @@ from corpcheck.models import (
 )
 from corpcheck.retrieval import load_known_tickers, retrieve
 from corpcheck.retrieval.abstain import evaluate_answerability
+from corpcheck.retrieval.search import get_model
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +33,10 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     pool = await get_pool()
     await load_known_tickers(pool)
+    # Fail during startup, rather than on the first user's request, if the
+    # configured embedding model cannot be loaded. get_model() is process-cached,
+    # so retrieval reuses this same instance.
+    get_model()
     yield
     await close_pool()
 
@@ -109,6 +118,53 @@ async def retrieve_endpoint(req: RetrieveRequest):
         fiscal_year=req.year,
     )
     return RetrieveResponse(chunks=chunks)
+
+
+@app.post("/answerability", response_model=AnswerabilityResponse)
+async def answerability_endpoint(req: AnswerabilityRequest):
+    """Retrieve evidence and apply the same pre-LLM gate used by chat and MCP."""
+    pool = await get_pool()
+    chunks = await retrieve(
+        pool=pool,
+        query=req.query,
+        k=req.k,
+        alpha=config.DEFAULT_ALPHA,
+        sector=None,
+        company=req.company,
+        filing_type=req.filing_type,
+        fiscal_year=req.year,
+    )
+    decision = evaluate_answerability(req.query, chunks, expected_company=req.company)
+
+    return AnswerabilityResponse(
+        query=req.query,
+        answerable=not decision.abstain,
+        gate_status=decision.status,
+        reason=decision.reason or "Evidence passed both confidence floors.",
+        llm_consulted=False,
+        similarity=AnswerabilitySimilarity(
+            top1_cos_sim=decision.top1,
+            mean_top3_cos_sim=decision.mean_top3,
+            top1_min=config.ABSTAIN_TOP1_MIN,
+            mean_top3_min=config.ABSTAIN_MEAN_TOP3_MIN,
+        ),
+        coverage=AnswerabilityCoverage(
+            retrieved=len(chunks),
+            with_dense_score=sum(chunk.cos_sim is not None for chunk in chunks),
+            sparse_only=sum(chunk.cos_sim is None for chunk in chunks),
+            companies=sorted({chunk.company for chunk in chunks if chunk.company}),
+            filing_types=sorted(
+                {chunk.filing_type for chunk in chunks if chunk.filing_type}
+            ),
+            fiscal_years=sorted(
+                {chunk.fiscal_year for chunk in chunks if chunk.fiscal_year is not None}
+            ),
+            source_types=sorted(
+                {chunk.source_type for chunk in chunks if chunk.source_type}
+            ),
+        ),
+        chunks=chunks,
+    )
 
 
 @app.post("/chat", dependencies=[Depends(require_api_key)])

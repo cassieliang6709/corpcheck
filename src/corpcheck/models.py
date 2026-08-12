@@ -1,5 +1,6 @@
 from datetime import date
 from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -42,6 +43,42 @@ class ChunkResult(BaseModel):
 
 
 class RetrieveResponse(BaseModel):
+    chunks: list[ChunkResult]
+
+
+class AnswerabilityRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    k: int = Field(default=5, ge=1, le=50)
+    company: Optional[str] = None
+    filing_type: Optional[str] = None
+    year: Optional[int] = Field(default=None, ge=1900, le=2100)
+
+
+class AnswerabilitySimilarity(BaseModel):
+    top1_cos_sim: Optional[float]
+    mean_top3_cos_sim: Optional[float]
+    top1_min: float
+    mean_top3_min: float
+
+
+class AnswerabilityCoverage(BaseModel):
+    retrieved: int
+    with_dense_score: int
+    sparse_only: int
+    companies: list[str]
+    filing_types: list[str]
+    fiscal_years: list[int]
+    source_types: list[str]
+
+
+class AnswerabilityResponse(BaseModel):
+    query: str
+    answerable: bool
+    gate_status: str
+    reason: str
+    llm_consulted: bool
+    similarity: AnswerabilitySimilarity
+    coverage: AnswerabilityCoverage
     chunks: list[ChunkResult]
 
 

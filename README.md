@@ -39,7 +39,7 @@ src/corpcheck/
 │   ├── fusion.py          Score fusion strategy
 │   └── rerank.py          Evidence-form adjustments, citation titles
 ├── llm/chat.py            Grounded answer generation (OpenAI-compatible endpoint)
-├── api/main.py            FastAPI: /retrieve, /chat, /filters, /health
+├── api/main.py            FastAPI: /answerability, /retrieve, /chat, /filters, /health
 └── mcp/                   Model Context Protocol server (stdio)
     ├── server.py          Tools: check_answerable, search_filings, get_filing_context
     └── provenance.py      Accession lookup + version governance on direct lookup
@@ -70,8 +70,29 @@ cp .env.example .env
 .venv/bin/uvicorn corpcheck.api.main:app --reload --port 8000
 ```
 
-`/retrieve` needs only Postgres. `/chat` additionally needs `SGLANG_BASE_URL`
-pointing at an OpenAI-compatible endpoint; it returns 503 when unset.
+`/answerability` and `/retrieve` need only Postgres. The API preloads the
+embedding model during startup so a model-loading failure is visible before the
+first user request. `/answerability` returns the deterministic gate decision,
+both measured confidence values and floors, evidence coverage, and the retrieved
+chunks; it never contacts an LLM. `/chat` additionally needs `SGLANG_BASE_URL`
+pointing at an OpenAI-compatible endpoint and returns 503 when unset.
+
+## Evidence demo
+
+The landing page now contains a retrieval-only Evidence Console. Chinese is the
+complete `/` route and English is the complete `/en/` route:
+
+```bash
+python3 -m http.server 4173 --directory landing
+```
+
+Open `http://127.0.0.1:4173/#demo-console` after starting the API. On localhost,
+the console calls `http://127.0.0.1:8000/answerability`. The public static page
+falls back to two explicitly labelled, recorded evidence states until a public
+API origin is configured in `landing/config.js`; custom questions are never
+presented as live in that mode. Generation remains disabled in the demo until
+the matched retrieval gates and the 34-answer rerun pass. The interview runbook
+and 60–90 second bilingual script are in `docs/INTERVIEW_DEMO.md`.
 
 ## MCP server
 
