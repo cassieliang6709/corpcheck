@@ -25,7 +25,8 @@
       <a class="brand" href="/">Corp<span>Check</span></a>
       <div class="nav-links">
         <a href="#demo-console">体验</a>
-        <a href="#how">方法</a>
+        <a href="#architecture">技术路线</a>
+        <a href="#code-map">代码</a>
         <a href="https://github.com/cassieliang6709/corpcheck" target="_blank" rel="noopener">GitHub</a>
         <a class="lang" href="/en/" lang="en" hreflang="en">EN</a>
       </div>
@@ -56,7 +57,7 @@
         <div class="stat"><b>469,874</b><span>已索引 chunks</span></div>
         <div class="stat"><b>1,662</b><span>份 10-K / 10-Q</span></div>
         <div class="stat"><b>50</b><span>家公司</span></div>
-        <div class="stat"><b>2018–2025</b><span>财年范围</span></div>
+        <div class="stat"><b>2017–2026</b><span>财年范围</span></div>
       </div>
       <p class="wrap snapshot-note">以上数字是当前可运行的历史语料快照，不代表正在重建的新语料已经通过评测。</p>
     </header>
@@ -96,6 +97,76 @@
           </div>
         </div>
         <p id="demo-mode" class="demo-mode"></p>
+      </div>
+    </section>
+
+    <section id="architecture" class="architecture-section">
+      <div class="wrap">
+        <p class="eyebrow">Technical route</p>
+        <h2>从 SEC 原文到可审计证据</h2>
+        <p class="section-intro">CorpCheck 的核心不是 prompt，而是一条可复现的检索链路。每一步都能回到源码、数据库字段和离线评测。</p>
+
+        <ol class="pipeline" aria-label="CorpCheck 技术路线">
+          <li class="pipeline-step">
+            <span class="step-number">01</span>
+            <div><p class="step-kicker">Ingest</p><h3>下载并识别 SEC filing</h3><p>从 EDGAR 获取 10-K / 10-Q，保留 ticker、CIK、accession number、提交日期和财年。</p></div>
+          </li>
+          <li class="pipeline-step">
+            <span class="step-number">02</span>
+            <div><p class="step-kicker">Represent</p><h3>按章节与表格重建文本</h3><p>清理 HTML，同时保留 section、table 与 provenance；SEC narrative 目标 420 tokens / 60 overlap，table 为 320 tokens / 3-row overlap。</p></div>
+          </li>
+          <li class="pipeline-step">
+            <span class="step-number">03</span>
+            <div><p class="step-kicker">Encode + index</p><h3>384 维向量与全文索引并存</h3><p><code>all-MiniLM-L6-v2</code> 生成归一化 embedding；PostgreSQL 同时维护 pgvector cosine 与 <code>ts_rank</code>。</p></div>
+          </li>
+          <li class="pipeline-step">
+            <span class="step-number">04</span>
+            <div><p class="step-kicker">Retrieve</p><h3>理解查询，再融合两路候选</h3><p>先解析公司、文件类型与财年；dense + sparse 各自召回后，以 RRF 融合，并过滤被 amendment 替换的 section。</p></div>
+          </li>
+          <li class="pipeline-step">
+            <span class="step-number">05</span>
+            <div><p class="step-kicker">Gate</p><h3>用原始 cosine 决定是否拒答</h3><p>Top-1 需 ≥ 0.42，mean top-3 需 ≥ 0.40。门槛读取未加 boost 的相似度，避免排序分数伪装成置信度。</p></div>
+          </li>
+          <li class="pipeline-step">
+            <span class="step-number">06</span>
+            <div><p class="step-kicker">Serve + evaluate</p><h3>HTTP、MCP 与评测共用 <code>retrieve()</code></h3><p>网页、agent 和离线 FinanceBench 不各写一套检索；生成层只有在证据 gate 通过后才有资格被调用。</p></div>
+          </li>
+        </ol>
+
+        <div class="route-note"><span>设计约束</span><p>同一个问题必须能沿着 <strong>输入 → 候选 → 融合 → 版本治理 → 门槛 → 来源</strong> 逐层解释；否则就不是审计级答案。</p></div>
+      </div>
+    </section>
+
+    <section id="code-map" class="code-section">
+      <div class="wrap code-layout">
+        <div class="code-intro">
+          <p class="eyebrow">Read the implementation</p>
+          <h2>逐层读代码，不靠架构图猜</h2>
+          <p>下面是最短阅读路径。链接固定到当前 evaluation-hardening 快照，方便逐行核对实现与声明是否一致。</p>
+          <a class="text-link" href="https://github.com/cassieliang6709/corpcheck/tree/472241f48232ea758a52d676613d27bbb44a1fc5" target="_blank" rel="noopener">打开完整代码快照 ↗</a>
+        </div>
+        <div class="code-list">
+          <a class="code-row" href="https://github.com/cassieliang6709/corpcheck/blob/472241f48232ea758a52d676613d27bbb44a1fc5/src/corpcheck/ingestion/processors/html_cleaner.py" target="_blank" rel="noopener"><span>01 · Representation</span><strong>html_cleaner.py</strong><small>章节、表格与 provenance 如何保留</small></a>
+          <a class="code-row" href="https://github.com/cassieliang6709/corpcheck/blob/472241f48232ea758a52d676613d27bbb44a1fc5/src/corpcheck/retrieval/pipeline.py#L51" target="_blank" rel="noopener"><span>02 · Orchestration</span><strong>retrieval/pipeline.py</strong><small>唯一的检索入口与候选编排</small></a>
+          <a class="code-row" href="https://github.com/cassieliang6709/corpcheck/blob/472241f48232ea758a52d676613d27bbb44a1fc5/src/corpcheck/retrieval/search.py" target="_blank" rel="noopener"><span>03 · Candidate generation</span><strong>retrieval/search.py</strong><small>pgvector、全文检索与 metadata scope</small></a>
+          <a class="code-row" href="https://github.com/cassieliang6709/corpcheck/blob/472241f48232ea758a52d676613d27bbb44a1fc5/src/corpcheck/retrieval/revision.py" target="_blank" rel="noopener"><span>04 · Governance</span><strong>retrieval/revision.py</strong><small>10-K/A 与 10-Q/A 的 section-aware 版本规则</small></a>
+          <a class="code-row" href="https://github.com/cassieliang6709/corpcheck/blob/472241f48232ea758a52d676613d27bbb44a1fc5/src/corpcheck/retrieval/abstain.py#L172" target="_blank" rel="noopener"><span>05 · Confidence gate</span><strong>retrieval/abstain.py</strong><small>为什么门槛使用 raw cosine，而不是 fused score</small></a>
+          <a class="code-row" href="https://github.com/cassieliang6709/corpcheck/blob/472241f48232ea758a52d676613d27bbb44a1fc5/evaluation/paired_retrieval_gate.py#L374" target="_blank" rel="noopener"><span>06 · Acceptance test</span><strong>paired_retrieval_gate.py</strong><small>同源前后对照、fail-closed gate 与实验结论</small></a>
+        </div>
+      </div>
+    </section>
+
+    <section id="model-stack" class="model-section">
+      <div class="wrap">
+        <p class="eyebrow">Model &amp; artifact boundary</p>
+        <h2>哪些是模型，哪些是 CorpCheck 自己的工程</h2>
+        <p class="section-intro">当前优势来自检索、版本治理和评测系统，不来自一份尚不存在的自训练权重。公开资产会按这个边界发布。</p>
+        <div class="model-grid">
+          <article class="model-card"><span class="status live">PUBLIC BASE MODEL</span><h3>Embedding encoder</h3><p><code>sentence-transformers/all-MiniLM-L6-v2</code>，384 维。当前用于 ingestion 与 query embedding；不是 CorpCheck 训练的模型。</p><a class="text-link" href="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2" target="_blank" rel="noopener">在 Hugging Face 查看 ↗</a></article>
+          <article class="model-card"><span class="status owned">CORPCHECK-OWNED</span><h3>Retrieval + governance</h3><p>Query parsing、hybrid retrieval、RRF、amendment filtering、abstain gate 和评测 harness 都在本仓库，可逐行审查。</p><a class="text-link" href="https://github.com/cassieliang6709/corpcheck" target="_blank" rel="noopener">查看 GitHub ↗</a></article>
+          <article class="model-card"><span class="status gated">GATED</span><h3>Generation backend</h3><p>代码支持通过 SGLang 接 OpenAI-compatible 模型，但面试 Demo 当前关闭生成；Qwen 不是本项目训练的权重。</p></article>
+          <article class="model-card"><span class="status next">NEXT PUBLIC ARTIFACT</span><h3>CorpCheck retrieval release</h3><p>先发布可运行 Space、system card 与评测数据。只有训练出的 reranker / embedding adapter 通过 held-out gate，才建立 CorpCheck model repo。</p></article>
+        </div>
       </div>
     </section>
 

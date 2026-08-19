@@ -82,6 +82,8 @@ pointing at an OpenAI-compatible endpoint and returns 503 when unset.
 The landing page now contains a retrieval-only Evidence Console. Chinese is the
 complete `/` route and English is the complete `/en/` route:
 
+**Live:** [corpcheck.liangyue.site](https://corpcheck.liangyue.site/)
+
 ```bash
 python3 -m http.server 4173 --directory landing
 ```
@@ -93,6 +95,25 @@ API origin is configured in `landing/config.js`; custom questions are never
 presented as live in that mode. Generation remains disabled in the demo until
 the matched retrieval gates and the 34-answer rerun pass. The interview runbook
 and 60–90 second bilingual script are in `docs/INTERVIEW_DEMO.md`.
+
+The portfolio upgrade sequence is documented in
+[`docs/CORPCHECK_UPGRADE_PLAN.md`](docs/CORPCHECK_UPGRADE_PLAN.md). It separates
+the public technical surface, Hugging Face Space/evaluation release, future
+CorpCheck-trained retrieval weights, and the interview package. The concrete
+Hub publishing checklist is in
+[`docs/HUGGING_FACE_RELEASE.md`](docs/HUGGING_FACE_RELEASE.md).
+
+### Model boundary
+
+The current embedding encoder is the public
+[`sentence-transformers/all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
+base model. CorpCheck owns the ingestion, query parsing, hybrid retrieval,
+revision governance, confidence gate, API/MCP adapters, and evaluation harness;
+it does **not** currently claim self-trained model weights. A CorpCheck model
+repository will be created only after a trained reranker or embedding adapter
+passes the held-out retrieval and refusal gates. Until then, the appropriate
+public Hugging Face artifacts are a retrieval-only Space and an evaluation
+repository, not a relabelled copy of someone else's weights.
 
 ## MCP server
 

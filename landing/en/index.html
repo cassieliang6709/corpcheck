@@ -20,14 +20,14 @@
   <script src="/app.js" defer></script>
 </head>
 <body>
-  <nav aria-label="Main navigation"><div class="wrap nav-inner"><a class="brand" href="/en/">Corp<span>Check</span></a><div class="nav-links"><a href="#demo-console">Demo</a><a href="#how">Method</a><a href="https://github.com/cassieliang6709/corpcheck" target="_blank" rel="noopener">GitHub</a><a class="lang" href="/" lang="zh-CN" hreflang="zh-CN">中文</a></div></div></nav>
+  <nav aria-label="Main navigation"><div class="wrap nav-inner"><a class="brand" href="/en/">Corp<span>Check</span></a><div class="nav-links"><a href="#demo-console">Demo</a><a href="#architecture">Architecture</a><a href="#code-map">Code</a><a href="https://github.com/cassieliang6709/corpcheck" target="_blank" rel="noopener">GitHub</a><a class="lang" href="/" lang="zh-CN" hreflang="zh-CN">中文</a></div></div></nav>
   <main>
     <header class="hero">
       <div class="wrap hero-grid">
         <div><p class="eyebrow">Evidence infrastructure for financial disclosure</p><h1>Do not generate first.<br><em>Prove the evidence is enough.</em></h1><p class="lede">Before answering a financial question, CorpCheck retrieves SEC filings, measures evidence strength, and preserves company, fiscal year, filing type, and source provenance. If the evidence is weak, it stops before an LLM is contacted.</p><div class="btn-row"><a class="btn btn-primary" href="#demo-console">Try the evidence check</a><a class="btn" href="https://github.com/cassieliang6709/corpcheck" target="_blank" rel="noopener">View source ↗</a></div></div>
         <aside class="hero-proof" aria-label="Current product boundary"><p class="proof-label">CURRENT PRODUCT BOUNDARY</p><p class="proof-title">Retrieval-only demo</p><p>The public experience shows retrieval, evidence gating, and provenance. Answer generation stays closed until the matched-corpus rebuild and retrieval gates pass.</p><div class="proof-row"><span>LLM consulted</span><strong>No</strong></div><div class="proof-row"><span>Evidence source</span><strong>SEC filings</strong></div></aside>
       </div>
-      <div class="wrap stats" aria-label="Current indexed corpus snapshot"><div class="stat"><b>469,874</b><span>indexed chunks</span></div><div class="stat"><b>1,662</b><span>10-K / 10-Q filings</span></div><div class="stat"><b>50</b><span>companies</span></div><div class="stat"><b>2018–2025</b><span>fiscal coverage</span></div></div>
+      <div class="wrap stats" aria-label="Current indexed corpus snapshot"><div class="stat"><b>469,874</b><span>indexed chunks</span></div><div class="stat"><b>1,662</b><span>10-K / 10-Q filings</span></div><div class="stat"><b>50</b><span>companies</span></div><div class="stat"><b>2017–2026</b><span>fiscal coverage</span></div></div>
       <p class="wrap snapshot-note">These figures describe the current runnable snapshot; they do not imply that the corpus now being rebuilt has passed evaluation.</p>
     </header>
 
@@ -37,6 +37,49 @@
         <div class="result-panel" id="result-panel" aria-live="polite" aria-busy="false"><div id="result-empty" class="result-empty"><span class="radar" aria-hidden="true"></span><p>Select a question and check its evidence.</p></div><div id="result-loading" class="result-loading" hidden><span class="spinner" aria-hidden="true"></span><div><strong>Searching SEC filings…</strong><p>Measuring evidence coverage and both confidence floors.</p></div></div><div id="result-content" hidden></div></div>
       </div><p id="demo-mode" class="demo-mode"></p>
     </div></section>
+
+    <section id="architecture" class="architecture-section">
+      <div class="wrap">
+        <p class="eyebrow">Technical route</p>
+        <h2>From SEC source to auditable evidence</h2>
+        <p class="section-intro">CorpCheck is not a prompt layer. It is a reproducible retrieval path whose decisions can be traced back to source code, database fields, and offline evaluation.</p>
+        <ol class="pipeline" aria-label="CorpCheck technical route">
+          <li class="pipeline-step"><span class="step-number">01</span><div><p class="step-kicker">Ingest</p><h3>Download and identify SEC filings</h3><p>Fetch 10-K and 10-Q filings from EDGAR while retaining ticker, CIK, accession number, filing date, and fiscal year.</p></div></li>
+          <li class="pipeline-step"><span class="step-number">02</span><div><p class="step-kicker">Represent</p><h3>Rebuild sections and tables</h3><p>Clean HTML without discarding sections, tables, or provenance; target 420 tokens / 60 overlap for SEC narrative and 320 tokens / 3-row overlap for tables.</p></div></li>
+          <li class="pipeline-step"><span class="step-number">03</span><div><p class="step-kicker">Encode + index</p><h3>Keep vector and full-text indexes</h3><p><code>all-MiniLM-L6-v2</code> produces normalized 384-dimensional embeddings; PostgreSQL stores both pgvector cosine and <code>ts_rank</code>.</p></div></li>
+          <li class="pipeline-step"><span class="step-number">04</span><div><p class="step-kicker">Retrieve</p><h3>Understand the query, then fuse candidates</h3><p>Parse issuer, filing type, and fiscal year; retrieve dense and sparse candidates, fuse with RRF, then remove sections superseded by amendments.</p></div></li>
+          <li class="pipeline-step"><span class="step-number">05</span><div><p class="step-kicker">Gate</p><h3>Refuse using raw cosine evidence</h3><p>Top-1 must be ≥ 0.42 and mean top-3 ≥ 0.40. The gate reads unboosted similarity so a ranking score cannot masquerade as confidence.</p></div></li>
+          <li class="pipeline-step"><span class="step-number">06</span><div><p class="step-kicker">Serve + evaluate</p><h3>HTTP, MCP, and evaluation share <code>retrieve()</code></h3><p>The web app, agents, and FinanceBench harness do not carry separate retrieval logic. Generation is eligible only after the evidence gate passes.</p></div></li>
+        </ol>
+        <div class="route-note"><span>DESIGN CONSTRAINT</span><p>Every answer must be explainable through <strong>input → candidates → fusion → revision governance → gate → source</strong>. Otherwise it is not audit-grade.</p></div>
+      </div>
+    </section>
+
+    <section id="code-map" class="code-section">
+      <div class="wrap code-layout">
+        <div class="code-intro"><p class="eyebrow">Read the implementation</p><h2>Follow the code, not an architecture claim</h2><p>This is the shortest reading path. Links are pinned to the current evaluation-hardening snapshot so each statement can be checked line by line.</p><a class="text-link" href="https://github.com/cassieliang6709/corpcheck/tree/472241f48232ea758a52d676613d27bbb44a1fc5" target="_blank" rel="noopener">Open the full code snapshot ↗</a></div>
+        <div class="code-list">
+          <a class="code-row" href="https://github.com/cassieliang6709/corpcheck/blob/472241f48232ea758a52d676613d27bbb44a1fc5/src/corpcheck/ingestion/processors/html_cleaner.py" target="_blank" rel="noopener"><span>01 · Representation</span><strong>html_cleaner.py</strong><small>Section, table, and provenance preservation</small></a>
+          <a class="code-row" href="https://github.com/cassieliang6709/corpcheck/blob/472241f48232ea758a52d676613d27bbb44a1fc5/src/corpcheck/retrieval/pipeline.py#L51" target="_blank" rel="noopener"><span>02 · Orchestration</span><strong>retrieval/pipeline.py</strong><small>The single retrieval entry point</small></a>
+          <a class="code-row" href="https://github.com/cassieliang6709/corpcheck/blob/472241f48232ea758a52d676613d27bbb44a1fc5/src/corpcheck/retrieval/search.py" target="_blank" rel="noopener"><span>03 · Candidate generation</span><strong>retrieval/search.py</strong><small>pgvector, full-text search, and metadata scope</small></a>
+          <a class="code-row" href="https://github.com/cassieliang6709/corpcheck/blob/472241f48232ea758a52d676613d27bbb44a1fc5/src/corpcheck/retrieval/revision.py" target="_blank" rel="noopener"><span>04 · Governance</span><strong>retrieval/revision.py</strong><small>Section-aware 10-K/A and 10-Q/A rules</small></a>
+          <a class="code-row" href="https://github.com/cassieliang6709/corpcheck/blob/472241f48232ea758a52d676613d27bbb44a1fc5/src/corpcheck/retrieval/abstain.py#L172" target="_blank" rel="noopener"><span>05 · Confidence gate</span><strong>retrieval/abstain.py</strong><small>Why the thresholds use raw cosine, not fused score</small></a>
+          <a class="code-row" href="https://github.com/cassieliang6709/corpcheck/blob/472241f48232ea758a52d676613d27bbb44a1fc5/evaluation/paired_retrieval_gate.py#L374" target="_blank" rel="noopener"><span>06 · Acceptance test</span><strong>paired_retrieval_gate.py</strong><small>Matched before/after runs and fail-closed decisions</small></a>
+        </div>
+      </div>
+    </section>
+
+    <section id="model-stack" class="model-section">
+      <div class="wrap">
+        <p class="eyebrow">Model &amp; artifact boundary</p><h2>What is a model, and what CorpCheck actually owns</h2><p class="section-intro">The current advantage comes from retrieval, revision governance, and evaluation—not from weights that do not exist. Public releases will preserve that boundary.</p>
+        <div class="model-grid">
+          <article class="model-card"><span class="status live">PUBLIC BASE MODEL</span><h3>Embedding encoder</h3><p><code>sentence-transformers/all-MiniLM-L6-v2</code>, 384 dimensions. It powers ingestion and query embeddings today; CorpCheck did not train it.</p><a class="text-link" href="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2" target="_blank" rel="noopener">View on Hugging Face ↗</a></article>
+          <article class="model-card"><span class="status owned">CORPCHECK-OWNED</span><h3>Retrieval + governance</h3><p>Query parsing, hybrid retrieval, RRF, amendment filtering, the abstain gate, and the evaluation harness are all reviewable in this repository.</p><a class="text-link" href="https://github.com/cassieliang6709/corpcheck" target="_blank" rel="noopener">View on GitHub ↗</a></article>
+          <article class="model-card"><span class="status gated">GATED</span><h3>Generation backend</h3><p>The code can call an OpenAI-compatible model through SGLang, but generation is disabled in the interview demo. Qwen weights are not trained by this project.</p></article>
+          <article class="model-card"><span class="status next">NEXT PUBLIC ARTIFACT</span><h3>CorpCheck retrieval release</h3><p>Publish a runnable Space, system card, and evaluation data first. Create a CorpCheck model repo only after a trained reranker or embedding adapter passes held-out gates.</p></article>
+        </div>
+      </div>
+    </section>
 
     <section id="how"><div class="wrap"><p class="eyebrow">Why this is not generic RAG</p><h2>Three promises that can be tested</h2><div class="cards"><article class="card"><span>01</span><h3>Evaluation constrains retrieval</h3><p>The serving API and FinanceBench evaluation call the same <code>retrieve()</code>. Strict Recall@10 is currently 0.1429, so generation remains closed instead of being marketed as reliable.</p></article><article class="card"><span>02</span><h3>Every result is traceable</h3><p>The web result retains ticker, filing type, fiscal year, filed date, and a direct SEC link; MCP filing context also returns the accession number.</p></article><article class="card"><span>03</span><h3>Refusal happens before the LLM</h3><p>Top-1 cosine must reach 0.42 and mean top-3 must reach 0.40. Missing either floor prevents weak evidence from reaching a generator.</p></article></div></div></section>
 
