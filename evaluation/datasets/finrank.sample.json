@@ -1,0 +1,18 @@
+[
+  {
+    "id": "fr-001",
+    "question": "What was Company A's adjusted revenue in 2025 compared with the wrong competitor?",
+    "company": "NVIDIA",
+    "year": 2026,
+    "positive": ["NVIDIA", "revenue"],
+    "negative": ["AMD", "Q1 only"]
+  },
+  {
+    "id": "fr-002",
+    "question": "Did Company B miss guidance due to cash flow decline?",
+    "company": "Alphabet",
+    "year": 2024,
+    "positive": ["Alphabet", "cash flow"],
+    "negative": ["Net income", "increase"]
+  }
+]

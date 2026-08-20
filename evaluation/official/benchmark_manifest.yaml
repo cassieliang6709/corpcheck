@@ -1,0 +1,52 @@
+version: "2026-08-20"
+created_at_utc: "2026-08-20T00:00:00Z"
+runs:
+  - name: financebench
+    status: planned
+    runner: financebench
+    source_repo: https://github.com/czyssrs/FinanceBench
+    dataset: evaluation/datasets/financebench_filtered.json
+    required_files:
+      - evaluation/datasets/financebench_filtered.json
+    notes: "FinanceBench 官方检索问答切片 + Provenance strict gate" 
+    default_args:
+      k: 10
+      alpha: 0.7
+      threshold: 0.5
+
+  - name: finrank
+    status: planned
+    runner: finrank
+    source_repo: https://github.com/SalesforceAIResearch/FinRank
+    dataset: evaluation/datasets/finrank.sample.json
+    required_files:
+      - evaluation/datasets/finrank.sample.json
+    notes: "financial hard-negative/reranking stress" 
+    default_args:
+      k: 20
+      alpha: 0.7
+      threshold: 0.1
+
+  - name: averitec
+    status: planned
+    runner: averitec
+    source_repo: https://github.com/MichSchli/AVeriTeC
+    dataset: evaluation/datasets/averitec.sample.json
+    required_files:
+      - evaluation/datasets/averitec.sample.json
+    notes: "claim-evidence-verdict structure alignment" 
+    default_args:
+      k: 8
+      alpha: 0.7
+
+  - name: corpcheck_claimcheckbench
+    status: planned
+    runner: claimcheckbench
+    source_repo: "internal://corpcheck-claimcheckbench"
+    dataset: evaluation/datasets/claimcheckbench.jsonl
+    required_files:
+      - evaluation/datasets/claimcheckbench.jsonl
+    notes: "内部自建，非官方；用于映射 claim + evidence trace 压力测试"
+    default_args:
+      k: 8
+      alpha: 0.7

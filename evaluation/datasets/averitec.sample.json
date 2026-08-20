@@ -1,0 +1,16 @@
+[
+  {
+    "id": "av-001",
+    "claim": "NVIDIA reported revenue growth above 20% in 2026.",
+    "company": "NVIDIA",
+    "label": "conflicting",
+    "claim_type": "reported_numeric"
+  },
+  {
+    "id": "av-002",
+    "claim": "The company disclosed a net profit increase in Q4 2026.",
+    "company": "Alphabet",
+    "label": "verified",
+    "claim_type": "narrative_disclosure"
+  }
+]
