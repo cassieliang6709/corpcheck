@@ -206,3 +206,65 @@ footer .wrap { display: flex; justify-content: space-between; gap: 20px; }
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ---- Architecture diagram (#architecture) ---------------------------------
+   Vertical flow so it stays legible on a phone. Colour is semantic, not
+   decorative: accent = evidence/answer path, blue = the sparse arm, bad = the
+   refuse branch. Everything reads from the tokens above so a palette change
+   does not leave the diagram behind. */
+.arch-figure { margin: 0 0 44px; }
+/* The diagram is ~760 units wide. Scaling that into a 375px phone would render
+   the 14px labels at ~7px, so scroll horizontally instead of shrinking: min-width
+   keeps the type legible and the container takes focus for keyboard scrolling. */
+.arch-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+.arch-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.arch-svg {
+  display: block;
+  width: 100%;
+  min-width: 680px;
+  max-width: 760px;
+  margin: 0 auto;
+  height: auto;
+  color: var(--faint); /* arrow markers inherit this via currentColor */
+}
+.arch-hint { display: none; margin: 8px 0 0; color: var(--faint); font: 11px/1.5 var(--mono); }
+.arch-band text { fill: var(--faint); font: 10px/1 var(--mono); letter-spacing: .16em; }
+.arch-band line { stroke: var(--line); stroke-width: 1; }
+
+.arch-node rect { fill: var(--panel-2); stroke: var(--line); stroke-width: 1; }
+.arch-node text { text-anchor: middle; }
+.arch-node .n-title { fill: var(--text); font: 600 14px/1 var(--sans); }
+.arch-node .n-sub { fill: var(--muted); font: 11px/1 var(--mono); }
+
+.arch-store rect { fill: var(--panel); }
+.arch-store line { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; }
+.arch-store .n-title { font-size: 13px; }
+.n-arm-a { fill: var(--accent); font: 11px/1 var(--mono); text-anchor: middle; }
+.n-arm-b { fill: var(--blue); font: 11px/1 var(--mono); text-anchor: middle; }
+
+.arch-node.is-arm-a rect { stroke: rgba(98, 232, 210, .5); }
+.arch-node.is-arm-b rect { stroke: rgba(138, 168, 255, .5); }
+
+.arch-node.is-gate rect { fill: var(--accent-dark); stroke: rgba(98, 232, 210, .45); }
+.arch-node .n-gate { fill: var(--accent); font: 11px/1 var(--mono); text-anchor: middle; }
+
+.arch-node.is-good rect { stroke: rgba(98, 232, 210, .55); }
+.arch-node.is-good .n-title { color: var(--accent); fill: var(--accent); }
+.arch-node.is-bad rect { stroke: rgba(255, 155, 137, .55); }
+.arch-node.is-bad .n-title { fill: var(--bad); }
+
+.arch-flow { stroke: var(--faint); stroke-width: 1.4; fill: none; }
+.arch-flow.is-good { stroke: var(--accent); color: var(--accent); }
+.arch-flow.is-bad { stroke: var(--bad); color: var(--bad); }
+
+.arch-figure figcaption {
+  margin: 18px auto 0;
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.arch-figure figcaption code { font-family: var(--mono); font-size: 13px; color: var(--text); }
+
+@media (max-width: 720px) {
+  .arch-hint { display: block; }
+}

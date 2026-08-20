@@ -43,7 +43,113 @@
         <p class="eyebrow">Technical route</p>
         <h2>From SEC source to auditable evidence</h2>
         <p class="section-intro">CorpCheck is not a prompt layer. It is a reproducible retrieval path whose decisions can be traced back to source code, database fields, and offline evaluation.</p>
-        <ol class="pipeline" aria-label="CorpCheck technical route">
+<figure class="arch-figure">
+          <div class="arch-scroll" tabindex="0" role="group" aria-label="Architecture diagram, horizontally scrollable"><svg class="arch-svg" viewBox="0 0 760 946" role="img" aria-labelledby="archTitleEn archDescEn" xmlns="http://www.w3.org/2000/svg">
+            <title id="archTitleEn">CorpCheck retrieval pipeline</title>
+            <desc id="archDescEn">Data flow from raw EDGAR filings to the evidence gate: ingest and chunk into PostgreSQL, which holds pgvector embeddings and a tsvector full-text index in the same table; a parsed query fans out to a dense and a sparse arm, sections superseded by amendments are dropped before RRF fuses the rankings, and a raw-cosine gate decides whether to refuse or let the LLM answer with citations.</desc>
+            <defs>
+              <marker id="ccArrowEn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,1 L9,5 L0,9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </marker>
+            </defs>
+
+            <g class="arch-band">
+              <text x="16" y="30">01–03 · INGEST</text>
+              <line x1="16" y1="42" x2="744" y2="42"/>
+            </g>
+
+            <g class="arch-node">
+              <rect x="230" y="60" width="300" height="58" rx="10"/>
+              <text class="n-title" x="380" y="84">SEC EDGAR · 10-K / 10-Q</text>
+              <text class="n-sub" x="380" y="104">ticker · CIK · accession · fiscal year</text>
+            </g>
+            <line class="arch-flow" x1="380" y1="118" x2="380" y2="146" marker-end="url(#ccArrowEn)"/>
+
+            <g class="arch-node">
+              <rect x="190" y="146" width="380" height="58" rx="10"/>
+              <text class="n-title" x="380" y="170">Clean → section-aware chunking</text>
+              <text class="n-sub" x="380" y="190">narrative 420 tok / 60 overlap · table 320 / 3 rows</text>
+            </g>
+            <line class="arch-flow" x1="380" y1="204" x2="380" y2="232" marker-end="url(#ccArrowEn)"/>
+
+            <g class="arch-node">
+              <rect x="230" y="232" width="300" height="58" rx="10"/>
+              <text class="n-title" x="380" y="256">Encode · all-MiniLM-L6-v2</text>
+              <text class="n-sub" x="380" y="276">384-dim, normalised</text>
+            </g>
+            <line class="arch-flow" x1="380" y1="290" x2="380" y2="318" marker-end="url(#ccArrowEn)"/>
+
+            <g class="arch-node arch-store">
+              <rect x="90" y="318" width="580" height="76" rx="10"/>
+              <line x1="380" y1="330" x2="380" y2="382"/>
+              <text class="n-title" x="380" y="340">PostgreSQL · same table</text>
+              <text class="n-arm-a" x="235" y="366">pgvector · cosine</text>
+              <text class="n-arm-b" x="525" y="366">tsvector · ts_rank</text>
+            </g>
+
+            <g class="arch-band">
+              <text x="16" y="440">04 · RETRIEVE</text>
+              <line x1="16" y1="452" x2="744" y2="452"/>
+            </g>
+
+            <g class="arch-node">
+              <rect x="210" y="470" width="340" height="58" rx="10"/>
+              <text class="n-title" x="380" y="494">Parse query · metadata scope</text>
+              <text class="n-sub" x="380" y="514">issuer · filing type · fiscal year</text>
+            </g>
+
+            <path class="arch-flow" d="M380 528 V548 H185 V576" fill="none" marker-end="url(#ccArrowEn)"/>
+            <path class="arch-flow" d="M380 528 V548 H575 V576" fill="none" marker-end="url(#ccArrowEn)"/>
+
+            <g class="arch-node is-arm-a">
+              <rect x="40" y="576" width="290" height="58" rx="10"/>
+              <text class="n-title" x="185" y="600">Dense arm</text>
+              <text class="n-sub" x="185" y="620">pgvector cosine</text>
+            </g>
+            <g class="arch-node is-arm-b">
+              <rect x="430" y="576" width="290" height="58" rx="10"/>
+              <text class="n-title" x="575" y="600">Sparse arm</text>
+              <text class="n-sub" x="575" y="620">Postgres full-text ts_rank</text>
+            </g>
+
+            <path class="arch-flow" d="M185 634 V658 H380 V684" fill="none" marker-end="url(#ccArrowEn)"/>
+            <path class="arch-flow" d="M575 634 V658 H380 V684" fill="none" marker-end="url(#ccArrowEn)"/>
+
+            <g class="arch-node">
+              <rect x="170" y="684" width="420" height="58" rx="10"/>
+              <text class="n-title" x="380" y="708">Revision filter → RRF fusion</text>
+              <text class="n-sub" x="380" y="728">drop sections superseded by 10-K/A · 10-Q/A, then fuse by rank</text>
+            </g>
+            <line class="arch-flow" x1="380" y1="742" x2="380" y2="764" marker-end="url(#ccArrowEn)"/>
+
+            <g class="arch-band">
+              <text x="16" y="786">05 · GATE</text>
+              <line x1="16" y1="796" x2="744" y2="796"/>
+            </g>
+
+            <g class="arch-node is-gate">
+              <rect x="152" y="808" width="456" height="26" rx="6"/>
+              <text class="n-gate" x="380" y="826">Evidence gate: top-1 ≥ 0.42 · mean top-3 ≥ 0.40 (raw cosine)</text>
+            </g>
+
+            <path class="arch-flow is-bad" d="M380 834 V856 H180 V878" fill="none" marker-end="url(#ccArrowEn)"/>
+            <path class="arch-flow is-good" d="M380 834 V856 H580 V878" fill="none" marker-end="url(#ccArrowEn)"/>
+
+            <g class="arch-node is-bad">
+              <rect x="35" y="878" width="290" height="52" rx="10"/>
+              <text class="n-title" x="180" y="900">Insufficient → refuse</text>
+              <text class="n-sub" x="180" y="919">no LLM call</text>
+            </g>
+            <g class="arch-node is-good">
+              <rect x="435" y="878" width="290" height="52" rx="10"/>
+              <text class="n-title" x="580" y="900">Sufficient → answer</text>
+              <text class="n-sub" x="580" y="919">with accession + section citation</text>
+            </g>
+          </svg>
+          </div>
+          <p class="arch-hint" aria-hidden="true">Scroll horizontally to see the full pipeline →</p>
+          <figcaption>HTTP, MCP, and the offline FinanceBench harness share one <code>retrieve()</code>: three entry points, not three retrieval implementations.</figcaption>
+        </figure>        <ol class="pipeline" aria-label="CorpCheck technical route">
           <li class="pipeline-step"><span class="step-number">01</span><div><p class="step-kicker">Ingest</p><h3>Download and identify SEC filings</h3><p>Fetch 10-K and 10-Q filings from EDGAR while retaining ticker, CIK, accession number, filing date, and fiscal year.</p></div></li>
           <li class="pipeline-step"><span class="step-number">02</span><div><p class="step-kicker">Represent</p><h3>Rebuild sections and tables</h3><p>Clean HTML without discarding sections, tables, or provenance; target 420 tokens / 60 overlap for SEC narrative and 320 tokens / 3-row overlap for tables.</p></div></li>
           <li class="pipeline-step"><span class="step-number">03</span><div><p class="step-kicker">Encode + index</p><h3>Keep vector and full-text indexes</h3><p><code>all-MiniLM-L6-v2</code> produces normalized 384-dimensional embeddings; PostgreSQL stores both pgvector cosine and <code>ts_rank</code>.</p></div></li>
