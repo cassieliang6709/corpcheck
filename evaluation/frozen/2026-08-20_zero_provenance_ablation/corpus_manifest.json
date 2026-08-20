@@ -1,0 +1,15 @@
+{
+    "chunks": 469874,
+    "filings": 1662,
+    "issuers": 50,
+    "filing_types": {
+        "10-K": 429,
+        "10-Q": 1233
+    },
+    "snapshot_date": "2026-08-20",
+    "filed_date_max": "2026-04-01",
+    "filed_date_min": "2017-07-20",
+    "amended_filings": 0,
+    "fiscal_year_max": 2026,
+    "fiscal_year_min": 2017
+}

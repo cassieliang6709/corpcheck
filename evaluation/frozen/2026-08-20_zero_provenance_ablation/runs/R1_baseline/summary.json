@@ -1,0 +1,468 @@
+{
+  "dataset": "evaluation/datasets/financebench_filtered.json",
+  "queries": 35,
+  "errors": 0,
+  "retrieval_config": {
+    "k": 10,
+    "alpha": 0.7
+  },
+  "primary_threshold": 0.5,
+  "primary": {
+    "config": {
+      "threshold": 0.5,
+      "variant": "clean",
+      "doc_gate": true,
+      "k": 10
+    },
+    "queries_scored": 35,
+    "mrr_at_k": 0.0,
+    "recall_at_1": 0.0,
+    "hit_at_1": 0.0,
+    "recall_at_3": 0.0,
+    "hit_at_3": 0.0,
+    "recall_at_5": 0.0,
+    "hit_at_5": 0.0,
+    "recall_at_10": 0.0,
+    "hit_at_10": 0.0
+  },
+  "gate_diagnostics": {
+    "queries": 35,
+    "mean_chunks_passing_gate": 0.71,
+    "queries_with_zero_passing": 19,
+    "queries_with_unresolvable_gold_doc": 0
+  },
+  "grid": [
+    {
+      "config": {
+        "threshold": 0.2,
+        "variant": "clean",
+        "doc_gate": true,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0464,
+      "recall_at_1": 0.0286,
+      "hit_at_1": 0.0286,
+      "recall_at_3": 0.0571,
+      "hit_at_3": 0.0571,
+      "recall_at_5": 0.0571,
+      "hit_at_5": 0.0571,
+      "recall_at_10": 0.0857,
+      "hit_at_10": 0.0857
+    },
+    {
+      "config": {
+        "threshold": 0.2,
+        "variant": "clean",
+        "doc_gate": false,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.3737,
+      "recall_at_1": 0.2905,
+      "hit_at_1": 0.3143,
+      "recall_at_3": 0.3762,
+      "hit_at_3": 0.4,
+      "recall_at_5": 0.4048,
+      "hit_at_5": 0.4286,
+      "recall_at_10": 0.4762,
+      "hit_at_10": 0.5143
+    },
+    {
+      "config": {
+        "threshold": 0.2,
+        "variant": "raw",
+        "doc_gate": true,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0782,
+      "recall_at_1": 0.0571,
+      "hit_at_1": 0.0571,
+      "recall_at_3": 0.0857,
+      "hit_at_3": 0.0857,
+      "recall_at_5": 0.0857,
+      "hit_at_5": 0.0857,
+      "recall_at_10": 0.1429,
+      "hit_at_10": 0.1429
+    },
+    {
+      "config": {
+        "threshold": 0.2,
+        "variant": "raw",
+        "doc_gate": false,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.5225,
+      "recall_at_1": 0.4429,
+      "hit_at_1": 0.4571,
+      "recall_at_3": 0.5429,
+      "hit_at_3": 0.5714,
+      "recall_at_5": 0.5714,
+      "hit_at_5": 0.6,
+      "recall_at_10": 0.6286,
+      "hit_at_10": 0.6571
+    },
+    {
+      "config": {
+        "threshold": 0.3,
+        "variant": "clean",
+        "doc_gate": true,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0143,
+      "recall_at_1": 0.0,
+      "hit_at_1": 0.0,
+      "recall_at_3": 0.0286,
+      "hit_at_3": 0.0286,
+      "recall_at_5": 0.0286,
+      "hit_at_5": 0.0286,
+      "recall_at_10": 0.0286,
+      "hit_at_10": 0.0286
+    },
+    {
+      "config": {
+        "threshold": 0.3,
+        "variant": "clean",
+        "doc_gate": false,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.3005,
+      "recall_at_1": 0.2381,
+      "hit_at_1": 0.2571,
+      "recall_at_3": 0.2952,
+      "hit_at_3": 0.3143,
+      "recall_at_5": 0.3095,
+      "hit_at_5": 0.3429,
+      "recall_at_10": 0.3667,
+      "hit_at_10": 0.4
+    },
+    {
+      "config": {
+        "threshold": 0.3,
+        "variant": "raw",
+        "doc_gate": true,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0179,
+      "recall_at_1": 0.0,
+      "hit_at_1": 0.0,
+      "recall_at_3": 0.0286,
+      "hit_at_3": 0.0286,
+      "recall_at_5": 0.0286,
+      "hit_at_5": 0.0286,
+      "recall_at_10": 0.0571,
+      "hit_at_10": 0.0571
+    },
+    {
+      "config": {
+        "threshold": 0.3,
+        "variant": "raw",
+        "doc_gate": false,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.3237,
+      "recall_at_1": 0.2762,
+      "hit_at_1": 0.2857,
+      "recall_at_3": 0.3048,
+      "hit_at_3": 0.3143,
+      "recall_at_5": 0.3476,
+      "hit_at_5": 0.3714,
+      "recall_at_10": 0.419,
+      "hit_at_10": 0.4571
+    },
+    {
+      "config": {
+        "threshold": 0.4,
+        "variant": "clean",
+        "doc_gate": true,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0,
+      "recall_at_1": 0.0,
+      "hit_at_1": 0.0,
+      "recall_at_3": 0.0,
+      "hit_at_3": 0.0,
+      "recall_at_5": 0.0,
+      "hit_at_5": 0.0,
+      "recall_at_10": 0.0,
+      "hit_at_10": 0.0
+    },
+    {
+      "config": {
+        "threshold": 0.4,
+        "variant": "clean",
+        "doc_gate": false,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.185,
+      "recall_at_1": 0.1524,
+      "hit_at_1": 0.1714,
+      "recall_at_3": 0.181,
+      "hit_at_3": 0.2,
+      "recall_at_5": 0.181,
+      "hit_at_5": 0.2,
+      "recall_at_10": 0.2095,
+      "hit_at_10": 0.2286
+    },
+    {
+      "config": {
+        "threshold": 0.4,
+        "variant": "raw",
+        "doc_gate": true,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0179,
+      "recall_at_1": 0.0,
+      "hit_at_1": 0.0,
+      "recall_at_3": 0.0286,
+      "hit_at_3": 0.0286,
+      "recall_at_5": 0.0286,
+      "hit_at_5": 0.0286,
+      "recall_at_10": 0.0571,
+      "hit_at_10": 0.0571
+    },
+    {
+      "config": {
+        "threshold": 0.4,
+        "variant": "raw",
+        "doc_gate": false,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.2336,
+      "recall_at_1": 0.1905,
+      "hit_at_1": 0.2,
+      "recall_at_3": 0.2476,
+      "hit_at_3": 0.2571,
+      "recall_at_5": 0.2762,
+      "hit_at_5": 0.2857,
+      "recall_at_10": 0.3048,
+      "hit_at_10": 0.3143
+    },
+    {
+      "config": {
+        "threshold": 0.5,
+        "variant": "clean",
+        "doc_gate": true,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0,
+      "recall_at_1": 0.0,
+      "hit_at_1": 0.0,
+      "recall_at_3": 0.0,
+      "hit_at_3": 0.0,
+      "recall_at_5": 0.0,
+      "hit_at_5": 0.0,
+      "recall_at_10": 0.0,
+      "hit_at_10": 0.0
+    },
+    {
+      "config": {
+        "threshold": 0.5,
+        "variant": "clean",
+        "doc_gate": false,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0952,
+      "recall_at_1": 0.0857,
+      "hit_at_1": 0.0857,
+      "recall_at_3": 0.1143,
+      "hit_at_3": 0.1143,
+      "recall_at_5": 0.1143,
+      "hit_at_5": 0.1143,
+      "recall_at_10": 0.1143,
+      "hit_at_10": 0.1143
+    },
+    {
+      "config": {
+        "threshold": 0.5,
+        "variant": "raw",
+        "doc_gate": true,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0143,
+      "recall_at_1": 0.0,
+      "hit_at_1": 0.0,
+      "recall_at_3": 0.0286,
+      "hit_at_3": 0.0286,
+      "recall_at_5": 0.0286,
+      "hit_at_5": 0.0286,
+      "recall_at_10": 0.0286,
+      "hit_at_10": 0.0286
+    },
+    {
+      "config": {
+        "threshold": 0.5,
+        "variant": "raw",
+        "doc_gate": false,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.1993,
+      "recall_at_1": 0.1524,
+      "hit_at_1": 0.1714,
+      "recall_at_3": 0.2095,
+      "hit_at_3": 0.2286,
+      "recall_at_5": 0.2095,
+      "hit_at_5": 0.2286,
+      "recall_at_10": 0.2381,
+      "hit_at_10": 0.2571
+    },
+    {
+      "config": {
+        "threshold": 0.6,
+        "variant": "clean",
+        "doc_gate": true,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0,
+      "recall_at_1": 0.0,
+      "hit_at_1": 0.0,
+      "recall_at_3": 0.0,
+      "hit_at_3": 0.0,
+      "recall_at_5": 0.0,
+      "hit_at_5": 0.0,
+      "recall_at_10": 0.0,
+      "hit_at_10": 0.0
+    },
+    {
+      "config": {
+        "threshold": 0.6,
+        "variant": "clean",
+        "doc_gate": false,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0952,
+      "recall_at_1": 0.0857,
+      "hit_at_1": 0.0857,
+      "recall_at_3": 0.1143,
+      "hit_at_3": 0.1143,
+      "recall_at_5": 0.1143,
+      "hit_at_5": 0.1143,
+      "recall_at_10": 0.1143,
+      "hit_at_10": 0.1143
+    },
+    {
+      "config": {
+        "threshold": 0.6,
+        "variant": "raw",
+        "doc_gate": true,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0,
+      "recall_at_1": 0.0,
+      "hit_at_1": 0.0,
+      "recall_at_3": 0.0,
+      "hit_at_3": 0.0,
+      "recall_at_5": 0.0,
+      "hit_at_5": 0.0,
+      "recall_at_10": 0.0,
+      "hit_at_10": 0.0
+    },
+    {
+      "config": {
+        "threshold": 0.6,
+        "variant": "raw",
+        "doc_gate": false,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0952,
+      "recall_at_1": 0.0857,
+      "hit_at_1": 0.0857,
+      "recall_at_3": 0.1143,
+      "hit_at_3": 0.1143,
+      "recall_at_5": 0.1143,
+      "hit_at_5": 0.1143,
+      "recall_at_10": 0.1143,
+      "hit_at_10": 0.1143
+    },
+    {
+      "config": {
+        "threshold": 0.7,
+        "variant": "clean",
+        "doc_gate": true,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0,
+      "recall_at_1": 0.0,
+      "hit_at_1": 0.0,
+      "recall_at_3": 0.0,
+      "hit_at_3": 0.0,
+      "recall_at_5": 0.0,
+      "hit_at_5": 0.0,
+      "recall_at_10": 0.0,
+      "hit_at_10": 0.0
+    },
+    {
+      "config": {
+        "threshold": 0.7,
+        "variant": "clean",
+        "doc_gate": false,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0381,
+      "recall_at_1": 0.0286,
+      "hit_at_1": 0.0286,
+      "recall_at_3": 0.0571,
+      "hit_at_3": 0.0571,
+      "recall_at_5": 0.0571,
+      "hit_at_5": 0.0571,
+      "recall_at_10": 0.0571,
+      "hit_at_10": 0.0571
+    },
+    {
+      "config": {
+        "threshold": 0.7,
+        "variant": "raw",
+        "doc_gate": true,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0,
+      "recall_at_1": 0.0,
+      "hit_at_1": 0.0,
+      "recall_at_3": 0.0,
+      "hit_at_3": 0.0,
+      "recall_at_5": 0.0,
+      "hit_at_5": 0.0,
+      "recall_at_10": 0.0,
+      "hit_at_10": 0.0
+    },
+    {
+      "config": {
+        "threshold": 0.7,
+        "variant": "raw",
+        "doc_gate": false,
+        "k": 10
+      },
+      "queries_scored": 35,
+      "mrr_at_k": 0.0762,
+      "recall_at_1": 0.0571,
+      "hit_at_1": 0.0571,
+      "recall_at_3": 0.1143,
+      "hit_at_3": 0.1143,
+      "recall_at_5": 0.1143,
+      "hit_at_5": 0.1143,
+      "recall_at_10": 0.1143,
+      "hit_at_10": 0.1143
+    }
+  ]
+}
