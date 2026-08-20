@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from corpcheck.claims.normalizer import (
     extract_numeric_bindings,
@@ -58,3 +59,18 @@ def test_extract_numeric_bindings_supports_percent_and_chinese_units():
     assert "万" in units
     # numeric normalization keeps 百分比 values as decimals with explicit unit.
     assert len(values) >= 2
+
+
+def test_extract_numeric_bindings_drops_tokenizer_split_decimal_tails():
+    """Some stored chunks arrive tokenized as "$ 98. 0 billion".
+
+    The fragment after the period must not be read as a standalone
+    "0 billion", or it shows up as counter-evidence in a verdict receipt.
+    """
+    values = extract_numeric_bindings("the fair value was $ 98. 0 billion in notes")
+    assert Decimal("0") not in [value for value, _unit, _raw in values]
+
+
+def test_extract_numeric_bindings_keeps_a_figure_after_a_sentence_ending_in_a_digit():
+    values = extract_numeric_bindings("Sales grew during 2023. $11.0 billion matured.")
+    assert Decimal("11000000000.0") in [value for value, _unit, _raw in values]

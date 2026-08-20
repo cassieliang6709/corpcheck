@@ -13,9 +13,28 @@ from typing import Any, Iterable, Optional
 
 from corpcheck.models import ChunkResult
 
+from .normalizer import (
+    _PERCENT_UNITS,
+    _UNIT_SCALE,
+    extract_numeric_bindings_with_spans,
+    find_metric_mentions,
+    parse_fiscal_period,
+)
 from .normalizer import _extract_metric as _infer_metric
-from .normalizer import extract_numeric_bindings
 from .schema import ClaimVerdict, EvidenceItem, FinancialClaim
+
+# A number is only treated as evidence for a metric when a mention of that
+# metric sits within this many characters of it. Beyond that the number is in a
+# different sentence or a different table row and binding it would be a guess.
+_METRIC_BINDING_WINDOW = 120
+
+# How far back to look for wording that marks a number as a movement.
+_CHANGE_WINDOW = 48
+_CHANGE_KEYWORDS = (
+    "increased", "decreased", "increase", "decrease", "grew", "growth",
+    "declined", "decline", "rose", "fell", "change", "changed", "higher",
+    "lower", "up by", "down by", "增长", "下降", "减少", "增加",
+)
 
 _STOP_WORDS = {
     "has",
@@ -44,32 +63,6 @@ _STOP_WORDS = {
     "will",
 }
 
-# Keep alias families explicit so comparison can match "total revenue" and
-# "net sales" as the same high-level intent.
-_METRIC_ALIASES = {
-    "revenue": {
-        "revenue",
-        "total revenue",
-        "net sales",
-        "sales",
-        "营业收入",
-        "营收",
-    },
-    "profit": {
-        "profit",
-        "net income",
-        "income",
-        "净利润",
-        "盈利",
-        "利润",
-    },
-    "eps": {"eps", "each share", "每股收益", "每股盈余"},
-    "margin": {"margin", "毛利", "净利率", "margin rate"},
-    "cash flow": {"cash flow", "现金流"},
-    "share": {"share", "shares", "股份", "股票"},
-}
-
-
 def _short_text(text: str, limit: int = 260) -> str:
     if len(text) <= limit:
         return text
@@ -77,35 +70,144 @@ def _short_text(text: str, limit: int = 260) -> str:
     return f"{text[:half]}…{text[-half:]}"
 
 
-def _metric_aliases(metric: Optional[str]) -> set[str]:
-    if not metric:
-        return set()
-    lowered = metric.lower()
-    return _METRIC_ALIASES.get(lowered, {lowered})
+def _excerpt_around(text: str, start: int, end: int, width: int = 220) -> str:
+    """Excerpt centred on the matched number, so the receipt shows the evidence.
+
+    A receipt whose excerpt does not contain the number it claims to bind is
+    useless to a human reviewer, so the window follows the match rather than
+    always quoting the head of the chunk.
+    """
+    if not text:
+        return ""
+    half = max(1, width // 2)
+    left = max(0, start - half)
+    right = min(len(text), end + half)
+    excerpt = text[left:right].strip()
+    if left > 0:
+        excerpt = f"…{excerpt}"
+    if right < len(text):
+        excerpt = f"{excerpt}…"
+    return excerpt
 
 
-def _metric_match(metric: Optional[str], chunk_text: str) -> bool:
-    if not metric:
-        return True
-    lowered = chunk_text.lower()
-    return any(alias in lowered for alias in _metric_aliases(metric))
+def _bound_metric(
+    mentions: list[tuple[int, int, str]], start: int, end: int
+) -> Optional[str]:
+    """Canonical metric that a number at ``[start, end)`` reports.
+
+    Financial prose names the metric *before* its value — "net sales were
+    $383.3 billion", "repurchased $19.1 billion". So the closest *preceding*
+    mention wins, and a following mention is only used when nothing precedes.
+    Pure nearest-mention binding is a coin flip on the very common
+    "net sales were $383.3 billion and net income was $97.0 billion", where the
+    next metric's name sits fewer characters away than the owning one.
+    """
+    before: Optional[tuple[int, str]] = None
+    after: Optional[tuple[int, str]] = None
+
+    for m_start, m_end, metric in mentions:
+        if m_start < end and m_end > start:
+            return metric
+        if m_end <= start:
+            distance = start - m_end
+            if distance <= _METRIC_BINDING_WINDOW and (
+                before is None or distance < before[0]
+            ):
+                before = (distance, metric)
+        else:
+            distance = m_start - end
+            if distance <= _METRIC_BINDING_WINDOW and (
+                after is None or distance < after[0]
+            ):
+                after = (distance, metric)
+
+    if before is not None:
+        return before[1]
+    return after[1] if after is not None else None
+
+
+def _is_change_amount(text: str, start: int) -> bool:
+    """True when a number reports a movement rather than a level.
+
+    "total net sales decreased 3% or $11.0 billion" states a delta, not a
+    balance. Scoring it against a claimed level produces a false refutation.
+    "increased to $383.3 billion" is excluded, since there the number *is* the
+    resulting level.
+    """
+    window = text[max(0, start - _CHANGE_WINDOW):start].lower()
+    match = None
+    for keyword in _CHANGE_KEYWORDS:
+        position = window.rfind(keyword)
+        if position != -1 and (match is None or position > match):
+            match = position
+    if match is None:
+        return False
+    return " to " not in window[match:]
 
 
 def _to_floatish(value: Decimal) -> float:
     return float(value)
 
 
-def _numeric_equal(a: Decimal, b: Decimal) -> bool:
+_CURRENCY_MARKS = ("$", "¥", "€", "£", "dollar", "usd", "美元")
+
+
+def _is_monetary(text: str) -> bool:
+    lowered = text.lower()
+    return any(mark in lowered for mark in _CURRENCY_MARKS)
+
+
+def _comparable_units(claim_unit: Optional[str], candidate_unit: Optional[str]) -> bool:
+    """True when two quantities are the same kind of thing.
+
+    Financial prose is full of bare integers — week counts, note numbers,
+    segment counts. Without this check "fiscal year 2023 spanned 53 weeks"
+    becomes counter-evidence against a revenue figure.
+    """
+    claim_scaled = claim_unit in _UNIT_SCALE
+    candidate_scaled = candidate_unit in _UNIT_SCALE
+    if claim_scaled or candidate_scaled:
+        return claim_scaled and candidate_scaled
+    if claim_unit in _PERCENT_UNITS or candidate_unit in _PERCENT_UNITS:
+        return claim_unit in _PERCENT_UNITS and candidate_unit in _PERCENT_UNITS
+    return claim_unit == candidate_unit
+
+
+def _rounding_tolerance(expected: Decimal, unit: Optional[str]) -> Decimal:
+    """Half a unit of the precision the claim was actually written at.
+
+    A press release saying "$383.3 billion" is not contradicted by a 10-K
+    saying "$383,285 million"; it is the same number quoted to fewer digits.
+    Comparing at the claim's own stated precision keeps that from being scored
+    as a refutation, without loosening into a blanket percentage tolerance.
+    """
+    scale = _UNIT_SCALE.get(unit or "", Decimal("1"))
+    stated = expected / scale if scale != 0 else expected
+    exponent = stated.normalize().as_tuple().exponent
+    if not isinstance(exponent, int):
+        return Decimal("0")
+    # Clamp at 10^0: normalize() strips trailing zeros, so "900" reports an
+    # exponent of +2 and would otherwise buy a ±50 billion tolerance.
+    quantum = Decimal(1).scaleb(min(0, exponent))
+    return (quantum / 2) * scale
+
+
+def _numeric_equal(a: Decimal, b: Decimal, tolerance: Decimal = Decimal("0")) -> bool:
     delta = abs(a - b)
+    if tolerance > 0 and delta <= tolerance:
+        return True
     scale = max(Decimal("1"), abs(a), abs(b))
     return _to_floatish(delta) <= 1e-6 * _to_floatish(scale)
 
 
 def _numeric_compare(
-    actual: Decimal, expected: Decimal, comparator: Optional[str]
+    actual: Decimal,
+    expected: Decimal,
+    comparator: Optional[str],
+    tolerance: Decimal = Decimal("0"),
 ) -> bool:
     if comparator in {None, "eq"}:
-        return _numeric_equal(actual, expected)
+        return _numeric_equal(actual, expected, tolerance)
     if comparator == "gt":
         return actual > expected
     if comparator == "lt":
@@ -114,7 +216,7 @@ def _numeric_compare(
         return actual >= expected
     if comparator == "lte":
         return actual <= expected
-    return _numeric_equal(actual, expected)
+    return _numeric_equal(actual, expected, tolerance)
 
 
 def _as_chunk_list(chunks: Iterable[Any]) -> list[ChunkResult]:
@@ -129,16 +231,50 @@ def _evidence_from_chunk(
     chunk: ChunkResult,
     value: Optional[Decimal] = None,
     unit: Optional[str] = None,
+    span: Optional[tuple[int, int]] = None,
 ) -> EvidenceItem:
+    excerpt = (
+        _excerpt_around(chunk.text, span[0], span[1])
+        if span is not None
+        else _short_text(chunk.text)
+    )
     return EvidenceItem(
         claim_id=claim_id,
         source=(chunk.source_url or chunk.chunk_id),
-        excerpt=_short_text(chunk.text),
+        excerpt=excerpt,
         filing_id=(chunk.chunk_id if "-" in chunk.chunk_id else None),
         score=(chunk.cos_sim),
         value=value,
         unit=unit,
     )
+
+
+def _is_after_cutoff(chunk: ChunkResult, claim: FinancialClaim) -> bool:
+    """True when the chunk was disclosed after the claim's ``as_of`` instant.
+
+    Filing date is checked at day granularity when available; fiscal year is
+    only a fallback, because a same-fiscal-year filing published months after
+    ``as_of`` is still future information the claim's author could not have had.
+    """
+    if claim.as_of is None:
+        return False
+    if chunk.filed_date is not None:
+        return chunk.filed_date > claim.as_of.date()
+    if chunk.fiscal_year is not None:
+        return chunk.fiscal_year > claim.as_of.year
+    return False
+
+
+def _period_mismatch(chunk: ChunkResult, period: Optional[tuple[int, Optional[int]]]) -> bool:
+    """True when the chunk provably covers a different fiscal period."""
+    if period is None:
+        return False
+    year, _quarter = period
+    if chunk.fiscal_year is None:
+        # Unknown provenance is not proof of mismatch; the caller records an
+        # obligation instead of silently trusting or silently dropping it.
+        return False
+    return chunk.fiscal_year != year
 
 
 def _keyword_overlap(a: str, b: str) -> float:
@@ -177,77 +313,117 @@ def _verify_with_chunk_set(
 
     support: list[EvidenceItem] = []
     oppose: list[EvidenceItem] = []
+    obligations: list[str] = []
 
     expected = claim.value
     metric = claim.metric or _infer_metric(claim.normalized_text)
-    as_of_year = claim.as_of.year if claim.as_of is not None else None
+    period = parse_fiscal_period(claim.normalized_text)
+    tolerance = (
+        _rounding_tolerance(expected, claim.unit)
+        if expected is not None
+        else Decimal("0")
+    )
+    claim_is_monetary = _is_monetary(claim.normalized_text)
 
-    for chunk in chunks:
-        if as_of_year is not None and chunk.fiscal_year and chunk.fiscal_year > as_of_year:
-            continue
+    if period is None:
+        obligations.append("claim_fiscal_period_not_identified")
 
-        lowered_chunk = chunk.text.lower()
-        if (
-            claim.checkability == "check_now"
-            and metric
-            and not _metric_match(metric, lowered_chunk)
-        ):
-            # Keep deterministic behavior: don't infer metric from the paragraph.
-            continue
-
-        if expected is not None and claim.value is not None:
-            for value, unit, _raw in extract_numeric_bindings(chunk.text):
-                if not _metric_match(metric, lowered_chunk):
-                    continue
-                if _numeric_compare(value, expected, claim.comparator):
-                    support.append(
-                        _evidence_from_chunk(claim.claim_id, chunk, value, unit)
-                    )
-                elif _metric_match(metric, lowered_chunk):
-                    oppose.append(
-                        _evidence_from_chunk(claim.claim_id, chunk, value, unit)
-                    )
-            continue
-
-        # Non-numeric claim (or missing explicit value): deterministic keyword overlap.
-        overlap = _keyword_overlap(claim.normalized_text, lowered_chunk)
-        if overlap >= 0.55:
-            support.append(_evidence_from_chunk(claim.claim_id, chunk))
-        else:
-            oppose.append(_evidence_from_chunk(claim.claim_id, chunk))
-
-    if support:
-        if expected is not None:
-            return ClaimVerdict(
-                claim_id=claim.claim_id,
-                verdict="verified",
-                reason_code="evidence_binds_value_and_metric",
-                evidence_for=support,
-                evidence_against=[],
-            )
+    # Fail closed: an unidentified metric used to mean "match any number", which
+    # let a claim about repurchases be "verified" by a dividend figure.
+    if expected is not None and metric is None:
         return ClaimVerdict(
             claim_id=claim.claim_id,
-            verdict="verified",
-            reason_code="narrative_support_in_retrieved_chunks",
-            evidence_for=support,
-            evidence_against=[],
+            verdict="insufficient_evidence",
+            reason_code="claim_metric_not_identified",
+            missing_obligations=["claim_metric_not_identified"],
         )
 
-    if oppose and expected is not None:
+    in_scope = 0
+    for chunk in chunks:
+        if _is_after_cutoff(chunk, claim):
+            continue
+        if _period_mismatch(chunk, period):
+            continue
+        if period is not None and chunk.fiscal_year is None:
+            obligations.append("chunk_period_metadata_missing")
+        in_scope += 1
+
+        if expected is not None:
+            mentions = find_metric_mentions(chunk.text)
+            for value, unit, raw, start, end in extract_numeric_bindings_with_spans(
+                chunk.text
+            ):
+                if not _comparable_units(claim.unit, unit):
+                    continue
+                if claim_is_monetary != _is_monetary(raw):
+                    # "repurchased 133 million shares" is a share count, not the
+                    # dollar amount a "$3.7 billion" claim is talking about.
+                    continue
+                if _bound_metric(mentions, start, end) != metric:
+                    continue
+                if _is_change_amount(chunk.text, start):
+                    continue
+                item = _evidence_from_chunk(
+                    claim.claim_id, chunk, value, unit, span=(start, end)
+                )
+                if _numeric_compare(value, expected, claim.comparator, tolerance):
+                    support.append(item)
+                else:
+                    oppose.append(item)
+            continue
+
+        # Non-numeric claim: deterministic keyword overlap can support a claim
+        # but can never refute one, so no opposing evidence is produced here.
+        if _keyword_overlap(claim.normalized_text, chunk.text.lower()) >= 0.55:
+            support.append(_evidence_from_chunk(claim.claim_id, chunk))
+
+    deduped_obligations = list(dict.fromkeys(obligations))
+
+    if not in_scope:
+        return ClaimVerdict(
+            claim_id=claim.claim_id,
+            verdict="insufficient_evidence",
+            reason_code="no_evidence_within_period_and_cutoff_scope",
+            missing_obligations=deduped_obligations,
+        )
+
+    if support and oppose:
         return ClaimVerdict(
             claim_id=claim.claim_id,
             verdict="conflicting",
-            reason_code="retrieved_chunks_disagree_with_numeric_assertion",
-            evidence_for=[],
+            reason_code="in_scope_evidence_disagrees_with_itself",
+            evidence_for=support,
             evidence_against=oppose,
+            missing_obligations=deduped_obligations,
+        )
+
+    if support:
+        return ClaimVerdict(
+            claim_id=claim.claim_id,
+            verdict="verified",
+            reason_code=(
+                "evidence_binds_metric_period_and_value"
+                if expected is not None
+                else "narrative_support_in_retrieved_chunks"
+            ),
+            evidence_for=support,
+            missing_obligations=deduped_obligations,
+        )
+
+    if oppose:
+        return ClaimVerdict(
+            claim_id=claim.claim_id,
+            verdict="refuted",
+            reason_code="evidence_binds_metric_and_period_but_value_differs",
+            evidence_against=oppose,
+            missing_obligations=deduped_obligations,
         )
 
     return ClaimVerdict(
         claim_id=claim.claim_id,
         verdict="insufficient_evidence",
-        reason_code="retrieved_chunks_do_not_bind_expected_numeric_claim",
-        evidence_for=[],
-        evidence_against=oppose,
+        reason_code="retrieved_chunks_do_not_bind_claim_metric",
+        missing_obligations=deduped_obligations,
     )
 
 
