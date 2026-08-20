@@ -9,6 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
 from corpcheck import settings as config
+from corpcheck.claims import normalize_claims
+from corpcheck.claims.schema import ClaimEvaluationRequest
+from corpcheck.claims.verifier import verify_claims
 from corpcheck.db import close_pool, get_pool
 from corpcheck.llm.chat import chat_once, stream_chat
 from corpcheck.models import (
@@ -18,6 +21,9 @@ from corpcheck.models import (
     AnswerabilitySimilarity,
     ChatRequest,
     ChatResponse,
+    ClaimCheckResponse,
+    ClaimEvidenceResponse,
+    ClaimVerificationRequest,
     FilterOptionsResponse,
     RetrieveRequest,
     RetrieveResponse,
@@ -164,6 +170,72 @@ async def answerability_endpoint(req: AnswerabilityRequest):
             ),
         ),
         chunks=chunks,
+    )
+
+
+@app.post("/claims/extract", response_model=ClaimCheckResponse)
+async def claims_extract_endpoint(req: ClaimEvaluationRequest):
+    """Extract atomic claim units from text (deterministic, no LLM)."""
+    claims = normalize_claims(req)
+    return ClaimCheckResponse(
+        source_text=req.source_text,
+        total_claims=len(claims),
+        claims=[c.model_dump(mode="json") for c in claims],
+    )
+
+
+def _to_claim_evidence(item) -> ClaimEvidenceResponse:
+    return ClaimEvidenceResponse(
+        claim_id=item.claim_id,
+        source=item.source,
+        excerpt=item.excerpt,
+        filing_id=item.filing_id,
+        score=item.score,
+        value=float(item.value) if item.value is not None else None,
+        unit=item.unit,
+    )
+
+
+@app.post("/claims/verify", response_model=ClaimCheckResponse)
+async def claims_verify_endpoint(req: ClaimVerificationRequest):
+    """Run deterministic claim verification against retrieved evidence."""
+    claims = normalize_claims(req)
+    pool = await get_pool()
+
+    chunk_batches: list[list] = []
+    for claim in claims:
+        chunks = await retrieve(
+            pool=pool,
+            query=claim.normalized_text,
+            k=req.k,
+            alpha=req.alpha,
+            sector=None,
+            company=claim.company_name,
+            filing_type=None,
+            fiscal_year=None,
+        )
+        chunk_batches.append(chunks)
+
+    verdicts, _ = verify_claims(claims, chunk_batches)
+    return ClaimCheckResponse(
+        source_text=req.source_text,
+        total_claims=len(claims),
+        claims=[c.model_dump(mode="json") for c in claims],
+        verdicts=[
+            {
+                "claim_id": verdict.claim_id,
+                "verdict": verdict.verdict,
+                "reason_code": verdict.reason_code,
+                "evidence_for": [
+                    _to_claim_evidence(item) for item in verdict.evidence_for
+                ],
+                "evidence_against": [
+                    _to_claim_evidence(item) for item in verdict.evidence_against
+                ],
+                "missing_obligations": verdict.missing_obligations,
+            }
+            for verdict in verdicts
+        ],
     )
 
 

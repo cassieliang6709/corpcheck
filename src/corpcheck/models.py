@@ -1,7 +1,9 @@
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
+
+from corpcheck.claims.schema import ClaimEvaluationRequest
 
 
 class RetrieveRequest(BaseModel):
@@ -110,3 +112,41 @@ class ChatResponse(BaseModel):
     # that was judged insufficient. Defaults keep existing clients working.
     abstained: bool = False
     abstain_reason: Optional[str] = None
+
+
+class ClaimVerificationRequest(ClaimEvaluationRequest):
+    k: int = Field(default=5, ge=1, le=20)
+    alpha: float = Field(default=0.7, ge=0.0, le=1.0)
+
+
+class ClaimEvidenceResponse(BaseModel):
+    claim_id: str
+    source: str
+    excerpt: str
+    filing_id: Optional[str] = None
+    score: Optional[float] = None
+    value: Optional[float] = None
+    unit: Optional[str] = None
+
+
+class ClaimVerdictResponse(BaseModel):
+    claim_id: str
+    verdict: Literal[
+        "verified",
+        "refuted",
+        "conflicting",
+        "insufficient_evidence",
+        "not_yet_decidable",
+        "non_verifiable",
+    ]
+    reason_code: str
+    evidence_for: list[ClaimEvidenceResponse] = Field(default_factory=list)
+    evidence_against: list[ClaimEvidenceResponse] = Field(default_factory=list)
+    missing_obligations: list[str] = Field(default_factory=list)
+
+
+class ClaimCheckResponse(BaseModel):
+    source_text: str
+    total_claims: int
+    claims: list[dict]
+    verdicts: list[ClaimVerdictResponse] = Field(default_factory=list)
