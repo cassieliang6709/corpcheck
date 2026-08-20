@@ -268,3 +268,39 @@ footer .wrap { display: flex; justify-content: space-between; gap: 20px; }
 @media (max-width: 720px) {
   .arch-hint { display: block; }
 }
+
+/* ---- Claim verification layer ---- */
+.claim-section { padding: 84px 0; border-top: 1px solid var(--line); }
+.claim-trace { display: grid; gap: 0; margin: 34px 0 0; }
+.trace-step { border: 1px solid var(--line); background: var(--panel); padding: 18px 20px; }
+.trace-step:first-of-type { border-radius: 10px 10px 0 0; }
+.trace-step:last-of-type { border-radius: 0 0 10px 10px; }
+.trace-step + .trace-step { border-top: 0; }
+.trace-label { margin: 0 0 8px; color: var(--faint); font: 11px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.trace-body { margin: 0; font-size: 15px; }
+.trace-body code { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+.trace-quote { margin: 0; font-size: 15px; line-height: 1.7; color: var(--muted); }
+.trace-quote b { color: var(--text); font-weight: 600; }
+.num-claimed { color: var(--bad); font-weight: 660; }
+.num-actual { color: var(--good); font-weight: 660; }
+.trace-fields { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.trace-fields li { border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; font: 12px/1.5 var(--mono); color: var(--muted); }
+.trace-fields b { color: var(--accent); font-weight: 600; }
+.trace-step.is-verdict { background: var(--panel-2); display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.verdict-badge { border: 1px solid var(--bad); border-radius: 6px; padding: 5px 11px; font: 12px/1.4 var(--mono); letter-spacing: .1em; color: var(--bad); }
+.verdict-why { margin: 0; flex: 1 1 260px; font-size: 14px; color: var(--muted); }
+.claim-was { margin: 26px 0 0; border-left: 2px solid var(--bad); padding: 4px 0 4px 18px; font-size: 15px; color: var(--muted); }
+.claim-was b { color: var(--text); font-weight: 600; }
+.verdict-table { width: 100%; margin: 34px 0 0; border-collapse: collapse; font-size: 14px; }
+.verdict-table th, .verdict-table td { border-bottom: 1px solid var(--line); padding: 10px 12px 10px 0; text-align: left; vertical-align: top; }
+.verdict-table th { color: var(--faint); font: 11px/1.4 var(--mono); letter-spacing: .1em; text-transform: uppercase; font-weight: 500; }
+.verdict-table td:first-child { font-family: var(--mono); font-size: 13px; color: var(--accent); white-space: nowrap; padding-right: 22px; }
+.verdict-table td { color: var(--muted); }
+.local-only { margin: 30px 0 0; border: 1px dashed var(--line); border-radius: 10px; padding: 16px 18px; background: rgba(138,168,255,.045); }
+.local-only p { margin: 0; font-size: 14px; color: var(--muted); }
+.local-only strong { color: var(--blue); font-weight: 600; }
+.local-only code { font-family: var(--mono); font-size: 13px; color: var(--text); }
+@media (max-width: 640px) {
+  .claim-section { padding: 60px 0; }
+  .verdict-table td:first-child { white-space: normal; }
+}

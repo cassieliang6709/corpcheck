@@ -26,6 +26,7 @@
       <div class="nav-links">
         <a href="#demo-console">体验</a>
         <a href="#architecture">技术路线</a>
+        <a href="#claims">声明核查</a>
         <a href="#code-map">代码</a>
         <a href="https://github.com/cassieliang6709/corpcheck" target="_blank" rel="noopener">GitHub</a>
         <a class="lang" href="/en/" lang="en" hreflang="en">EN</a>
@@ -244,6 +245,56 @@
       </div>
     </section>
 
+    <section id="claims" class="claim-section">
+      <div class="wrap">
+        <p class="eyebrow">Claim verification layer</p>
+        <h2>同一套证据，第二个用途</h2>
+        <p class="section-intro">检索层回答「有没有证据」；claim 层回答「这句话是不是真的」。两者共用同一个 <code>retrieve()</code>、同一份语料、同一套 provenance 规则——它不是另一个项目，是同一个内核的第二个接口。判定过程不调用 LLM。</p>
+
+        <div class="claim-trace">
+          <div class="trace-step">
+            <p class="trace-label">01 · 输入一句新闻</p>
+            <p class="trace-body">「Apple <span class="num-claimed">repurchased $3.7 billion</span> of its common stock during the second quarter of fiscal 2023.」</p>
+          </div>
+          <div class="trace-step">
+            <p class="trace-label">02 · 拆成结构化 claim</p>
+            <ul class="trace-fields">
+              <li>metric <b>share_repurchase</b></li>
+              <li>period <b>FY2023Q2</b></li>
+              <li>value <b>$3.7B</b></li>
+              <li>as_of <b>day-granular</b></li>
+            </ul>
+          </div>
+          <div class="trace-step">
+            <p class="trace-label">03 · 在 10-Q 原文中绑定数值</p>
+            <p class="trace-quote">The Company <b>repurchased</b> <span class="num-actual">$19.1 billion</span> of its common stock and paid <b>dividends</b> and dividend equivalents of <span class="num-claimed">$3.7 billion</span> during the period.</p>
+          </div>
+          <div class="trace-step is-verdict">
+            <span class="verdict-badge">REFUTED</span>
+            <p class="verdict-why">$3.7B 绑定的是 <b>dividend</b>，不是 <b>share_repurchase</b>。回购的真实数字是 $19.1B，与声明不符。</p>
+          </div>
+        </div>
+
+        <p class="claim-was">这条案例是回归测试，因为<b>第一版把它判成了 verified</b>。当时的实现只检查「这个数字有没有出现在检索到的文本里」，指标和财年从未被提取——同一句话里的分红金额足以为一条关于回购的声明背书。对一个以核查金融声明为目的的系统，<b>误判为真比查不出来更严重</b>。现在数值必须绑定到它前面出现的指标名，指标识别不出时直接 fail closed。</p>
+
+        <table class="verdict-table">
+          <thead><tr><th>Verdict</th><th>含义</th></tr></thead>
+          <tbody>
+            <tr><td>verified</td><td>指标、期间、数值三者都与检索到的证据绑定一致</td></tr>
+            <tr><td>refuted</td><td>指标与期间已绑定，数值不符</td></tr>
+            <tr><td>conflicting</td><td>范围内的证据自相矛盾</td></tr>
+            <tr><td>insufficient_evidence</td><td>范围内没有任何证据能绑定到该指标</td></tr>
+            <tr><td>not_yet_decidable</td><td>预测类声明，证据尚不存在</td></tr>
+            <tr><td>non_verifiable</td><td>观点或不可证伪的表述</td></tr>
+          </tbody>
+        </table>
+
+        <div class="local-only">
+          <p><strong>当前边界：</strong>claim 层通过 <code>POST /claims/extract</code> 与 <code>POST /claims/verify</code> 提供，运行在本地 API 上。<strong>本页是静态页面，没有后端，无法在线试用。</strong>8 个对抗回归用例覆盖了指标误绑、变化量、股数与金额混淆、四舍五入和时点截止；证据「选择」仍弱于证据「绑定」，遗留缺陷记录在 <code>docs/CLAIMS_DEMO.md</code>。</p>
+        </div>
+      </div>
+    </section>
+
     <section id="code-map" class="code-section">
       <div class="wrap code-layout">
         <div class="code-intro">
@@ -291,7 +342,7 @@
 
     <section class="boundary">
       <div class="wrap boundary-grid">
-        <div><p class="eyebrow">Verified now</p><h2>现在可以展示的</h2><ul><li>Hybrid retrieval 与来源证据</li><li>确定性 answerability gate</li><li>1,662 filings / 469,874 chunks 的当前快照</li><li>HTTP API 与 MCP 共用检索路径</li></ul></div>
+        <div><p class="eyebrow">Verified now</p><h2>现在可以展示的</h2><ul><li>Hybrid retrieval 与来源证据</li><li>确定性 answerability gate</li><li>1,662 filings / 469,874 chunks 的当前快照</li><li>HTTP API 与 MCP 共用检索路径</li><li>确定性 claim 判定（本地 API，非在线）</li></ul></div>
         <div><p class="eyebrow muted">After evaluation</p><h2>通过 gate 后再开放的</h2><ul><li>生成最终财务答案</li><li>新的 34-answer 准确率</li><li>同源重建语料的提升结论</li><li>公开、无限制的交互服务</li></ul></div>
       </div>
     </section>
