@@ -46,7 +46,8 @@ Thumbs.db
 .env
 evaluation/runs/
 # Benchmark run artifacts: reproduced from a command, not source of truth.
-evals/
+# (evals/ moved out with the GSM8K track; official runs land in
+#  evaluation/official/runs/, which is deliberately NOT ignored.)
 evaluation/runs/*/queries.jsonl
 docker/financial_rag.dump
 .playwright-cli/
