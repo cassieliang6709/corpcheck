@@ -1398,7 +1398,12 @@ def run_plan(plan: BenchmarkPlan, args: argparse.Namespace) -> BenchmarkResult:
             status="skipped",
             timestamp_utc=datetime.now(tz=UTC).isoformat(),
             elapsed_seconds=0.0,
-            summary={"reason": "AI Infra GSM8K task must be run via scripts/run_gsm8k.py"},
+            summary={
+                "reason": (
+                    "GSM8K moved to the ai-infra-gsm8k repository on 2026-08-20; "
+                    "run it there with scripts/run_gsm8k.py"
+                )
+            },
             config={"k": k, "alpha": alpha, "seed": seed},
             error="manual-runner-only",
         )

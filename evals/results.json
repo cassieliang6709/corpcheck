@@ -1,11 +1,11 @@
 {
-  "generated_at_utc": "2026-08-20T03:33:53.003873+00:00",
+  "generated_at_utc": "2026-08-20T03:35:07.348757+00:00",
   "manifest_version": "2026-08-20",
   "manifest": "evaluation/official/benchmark_manifest.yaml",
   "run_metadata": {
     "seed": 42,
     "hardware": "Darwin|25.5.0|arm64|arm|cpu=8",
-    "commit": "6eb3d9c88cf405d7501d65ce780b56b5291dea4a"
+    "commit": "4054932cecd4b20eed9357a6e59a86a025f6f73d"
   },
   "results": [
     {
