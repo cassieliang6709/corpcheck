@@ -1,0 +1,28 @@
+name: gsm8k_baseline
+seed: 42
+mode: baseline
+dataset:
+  name: gsm8k
+  split: main
+  max_length: 1024
+model:
+  id: "Qwen/Qwen2.5-0.5B-Instruct"
+  max_seq_length: 2048
+training:
+  framework: hf-trainer
+  per_device_train_batch_size: 16
+  per_device_eval_batch_size: 8
+  learning_rate: 2.0e-5
+  warmup_ratio: 0.05
+  num_train_epochs: 1
+  max_steps: 300
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: true
+  logging_steps: 20
+  eval_steps: 100
+  save_steps: 100
+  output_dir: output/ai_infra/gsm8k-baseline
+  seed: 42
+evaluation:
+  metric: pass@1
+  repeats: 3

@@ -45,6 +45,8 @@ Thumbs.db
 .venv/
 .env
 evaluation/runs/
+# Benchmark run artifacts: reproduced from a command, not source of truth.
+evals/
 evaluation/runs/*/queries.jsonl
 docker/financial_rag.dump
 .playwright-cli/

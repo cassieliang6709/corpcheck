@@ -1,0 +1,83 @@
+version: "2026-08-20"
+created_at_utc: "2026-08-20T00:00:00Z"
+runs:
+  - name: gsm8k_baseline
+    status: planned
+    area: ai_infra
+    description: GSM8K baseline (no LoRA)
+    runner: gsm8k
+    default_args:
+      seed: 42
+      batch_size: 16
+      epochs: 1
+      max_steps: 300
+      learning_rate: 2e-5
+      output_dir: output/ai_infra/gsm8k-baseline
+
+  - name: gsm8k_lora_sft
+    status: planned
+    area: ai_infra
+    description: GSM8K LoRA SFT
+    runner: gsm8k
+    default_args:
+      seed: 42
+      batch_size: 16
+      epochs: 2
+      max_steps: 600
+      lora_r: 16
+      lora_alpha: 32
+      lora_dropout: 0.05
+      output_dir: output/ai_infra/gsm8k-lora
+
+  - name: gsm8k_grpo
+    status: planned
+    area: ai_infra
+    description: GSM8K GRPO replication attempt
+    runner: gsm8k
+    default_args:
+      seed: 42
+      batch_size: 8
+      max_steps: 1000
+      learning_rate: 1e-5
+      reward_model: gsm8k
+      output_dir: output/ai_infra/gsm8k-grpo
+
+  - name: financebench
+    status: planned
+    area: corpcheck
+    description: FinanceBench official eval slice
+    runner: financebench
+    source_repo: https://github.com/czyssrs/FinanceBench
+    dataset: evaluation/datasets/financebench_filtered.json
+    required_files:
+      - evaluation/datasets/financebench_filtered.json
+
+  - name: finrank
+    status: planned
+    area: corpcheck
+    description: FinRank official rerank stress
+    runner: finrank
+    source_repo: https://github.com/SalesforceAIResearch/FinRank
+    dataset: evaluation/datasets/finrank.json
+    required_files:
+      - evaluation/datasets/finrank.json
+
+  - name: averitec
+    status: planned
+    area: corpcheck
+    description: AVeriTeC claim/evidence/verdict mapping
+    runner: averitec
+    source_repo: https://github.com/MichSchli/AVeriTeC
+    dataset: evaluation/datasets/averitec.json
+    required_files:
+      - evaluation/datasets/averitec.json
+
+  - name: corpcheck_claimcheckbench
+    status: planned
+    area: corpcheck
+    description: Internal claim check benchmark
+    runner: claimcheckbench
+    source_repo: internal://corpcheck-claimcheckbench
+    dataset: evaluation/datasets/claimcheckbench.jsonl
+    required_files:
+      - evaluation/datasets/claimcheckbench.jsonl
