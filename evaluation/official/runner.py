@@ -586,14 +586,27 @@ def run_financebench(
         k=k,
     )
 
+    errors = sum(1 for row in records if row.error is not None)
+
     return BenchmarkResult(
         task=plan.name,
-        status="completed",
+        # A run that lost queries to infrastructure failures scored a different
+        # denominator than the protocol asks for, so its metrics are not
+        # comparable to a clean run. Reporting that as "completed" is how a
+        # degraded run gets quoted as a result.
+        status="completed" if errors == 0 else "degraded",
+        error=(
+            None
+            if errors == 0
+            else f"{errors} of {len(records)} queries failed to retrieve"
+        ),
         timestamp_utc=datetime.now(tz=UTC).isoformat(),
         elapsed_seconds=(datetime.now(tz=UTC) - start).total_seconds(),
         summary={
             "records": len(records),
-            "errors": sum(1 for row in records if row.error is not None),
+            "errors": errors,
+            "scored": len(records) - errors,
+            "comparable": errors == 0,
             "primary_with_gate": gated,
             "primary_no_gate": ungated,
             "gate_diagnostics": gate_diagnostics(records),
