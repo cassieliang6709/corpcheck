@@ -6,6 +6,8 @@ one-shot mode.
 
 The client is lazy-initialized so the container can start successfully even
 with SGLANG_BASE_URL empty — failure surfaces at request time as an HTTP 503.
+
+中文：聊天层只格式化已检索证据并调用兼容 OpenAI 的端点；未配置模型时延迟到请求阶段报错。
 """
 
 import asyncio
@@ -119,7 +121,10 @@ _client_lock = asyncio.Lock()
 
 
 async def get_llm_client() -> AsyncOpenAI:
-    """Lazy-init AsyncOpenAI so the container starts without SGLANG_BASE_URL set."""
+    """Lazily create one shared client after validating the configured endpoint.
+
+    中文：延迟初始化让不启用聊天的部署仍能启动；锁避免并发首请求创建多个客户端。
+    """
     global _client
     if _client is None:
         async with _client_lock:
@@ -138,7 +143,10 @@ async def get_llm_client() -> AsyncOpenAI:
 
 
 def format_context(chunks: list[ChunkResult]) -> str:
-    """Format chunks as numbered blocks with source-aware metadata for citation."""
+    """Format chunks as numbered, source-labelled blocks for citation.
+
+    中文：编号必须与模型提示词中的引用号一致，并保留公司、文件类型和日期等溯源信息。
+    """
     blocks = []
     for i, c in enumerate(chunks, 1):
         source_label = c.source_type.upper()
@@ -158,7 +166,10 @@ def format_context(chunks: list[ChunkResult]) -> str:
 def build_messages(
     query: str, context: str, system_prompt: Optional[str] = None
 ) -> list[dict]:
-    """Build the OpenAI chat messages list: one system turn + one user turn."""
+    """Build one system message and one evidence-backed user message.
+
+    中文：调用方可提供系统提示词；否则使用默认的“仅依据上下文回答”策略。
+    """
     sp = system_prompt or DEFAULT_SYSTEM_PROMPT
     user = f"Context from retrieved company sources:\n\n{context}\n\nQuestion: {query}"
     return [
@@ -176,6 +187,8 @@ async def stream_chat(
 
     Events shape: {"event": "thinking"|"answer"|"error"|"done", "data": json_str}.
     Caller wraps in sse_starlette.EventSourceResponse.
+
+    中文：生成器将模型增量转为 SSE 事件；流开始后只能以内嵌 error 事件报告错误。
     """
     client = await get_llm_client()
     messages = build_messages(query, format_context(chunks), system_prompt)
@@ -222,7 +235,10 @@ async def chat_once(
     chunks: list[ChunkResult],
     system_prompt: Optional[str] = None,
 ) -> dict:
-    """Non-streaming one-shot call. Returns {'answer': str, 'thinking': str|None}."""
+    """Run one non-streaming completion and return answer plus optional reasoning.
+
+    中文：非流式路径保持与 SSE 路径相同的消息构造，只在边界处返回完整结果。
+    """
     client = await get_llm_client()
     messages = build_messages(query, format_context(chunks), system_prompt)
 

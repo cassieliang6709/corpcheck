@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Fail-closed, checkpointed reprocessing of a verified SEC corpus clone."""
+"""Fail-closed, checkpointed reprocessing of a verified SEC corpus clone.
+
+中文：仅重处理已经验证的 SEC 原始提交，并在数据库、输入清单或检查点不一致时
+立即失败。它刻意优先保护语料身份，而非尝试猜测或修复不可信输入。
+"""
 
 from __future__ import annotations
 
@@ -83,6 +87,11 @@ class ReprocessInputError(RuntimeError):
 
 @dataclass(frozen=True)
 class DatabaseEndpoint:
+    """Credential-free runtime database identity used for isolation checks.
+
+    中文：用于比较数据库服务器和名称的最小端点身份，故意不保留凭据。
+    """
+
     host: str
     port: int
     database_name: str
@@ -90,6 +99,11 @@ class DatabaseEndpoint:
 
 @dataclass(frozen=True)
 class CorpusIdentity:
+    """Stable counts and digest describing a corpus before destructive work.
+
+    中文：重处理前用于判断源语料与目标语料是否符合预期的身份快照。
+    """
+
     database_name: str
     company_count: int
     filing_count: int
@@ -98,18 +112,33 @@ class CorpusIdentity:
 
 @dataclass(frozen=True)
 class DatabasePreflight:
+    """Paired source/target corpus identities established before processing.
+
+    中文：在写入之前完成的双库预检结果；调用方据此拒绝错误方向或污染的目标库。
+    """
+
     old: CorpusIdentity
     new: CorpusIdentity
 
 
 @dataclass(frozen=True)
 class ChunkSnapshot:
+    """Deterministic chunk count and digest for one processed filing.
+
+    中文：用来验证重处理输出，而不是只依赖可能相同的行数。
+    """
+
     count: int
     sha256: str
 
 
 @dataclass(frozen=True)
 class FilingTarget:
+    """Database row identity that a verified raw submission must match exactly.
+
+    中文：目标库中待替换 filing 的受限身份；不完全匹配时不能把原始提交写入该行。
+    """
+
     filing_id: int
     ticker: str
     sector: str
@@ -125,6 +154,11 @@ class FilingTarget:
 
 @dataclass(frozen=True)
 class VerifiedSubmission:
+    """Recovered file whose path, size, and digest passed manifest validation.
+
+    中文：已通过恢复报告验证的单份原始提交；后续处理不得绕过这层完整性证明。
+    """
+
     filing: FilingSpec
     path: Path
     relative_path: str
@@ -134,6 +168,11 @@ class VerifiedSubmission:
 
 @dataclass(frozen=True)
 class ReprocessingInputs:
+    """Verified manifest, report, recovery root, and submissions for one run.
+
+    中文：重处理允许使用的全部冻结输入，集中保存以避免流程中重新发现或替换文件。
+    """
+
     manifest_path: Path
     manifest_payload_sha256: str
     recovery_report_path: Path
@@ -932,6 +971,10 @@ def run_reprocessing(
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse reprocessing configuration before opening either database.
+
+    中文：只建立显式输入配置；源/目标身份、恢复报告和检查点仍在执行中 fail-closed 验证。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--old-database-url", required=True)
     parser.add_argument("--new-database-url", required=True)
@@ -949,6 +992,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Run verified corpus reprocessing behind the CLI exit-code boundary.
+
+    中文：入口不提供不安全的继续模式；任一预检或检查点契约失败都会中止。
+    """
     args = parse_args(argv)
     try:
         run_reprocessing(

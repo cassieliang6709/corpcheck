@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Run :mod:`evaluation.ir_eval` with a named query-understanding feature turned off.
 
+中文：在同一份实时语料上逐项关闭查询理解特性，避免把代码差异与语料变化混在一起；
+该实验入口只服务于可复现的归因比较。
+
 A "before" number is only trustworthy if it can be reproduced against the same
 corpus as the "after" number. Checking out an old commit does not give that:
 the corpus grows, so the two runs would differ by both code *and* data. This
@@ -90,6 +93,10 @@ ABLATIONS = {
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Disable selected query features, then delegate to the unchanged IR CLI.
+
+    中文：入口只在当前进程中施加明确的消融开关；其余参数仍由原始 IR 评测器验证。
+    """
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

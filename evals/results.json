@@ -1,25 +1,88 @@
 {
-  "generated_at_utc": "2026-08-20T03:35:07.348757+00:00",
+  "generated_at_utc": "2026-08-20T04:24:56.576087+00:00",
   "manifest_version": "2026-08-20",
-  "manifest": "evaluation/official/benchmark_manifest.yaml",
+  "manifest": "/Users/cassie/Developer/01_Career_Portfolio/corpcheck/evaluation/official/benchmark_manifest.yaml",
   "run_metadata": {
     "seed": 42,
     "hardware": "Darwin|25.5.0|arm64|arm|cpu=8",
-    "commit": "4054932cecd4b20eed9357a6e59a86a025f6f73d"
+    "commit": "ad6a97ca0c5d110f6f48256d06378d1acafb92a9"
   },
   "results": [
     {
       "task": "financebench",
       "status": "completed",
-      "timestamp_utc": "2026-08-20T00:00:00Z",
-      "elapsed_seconds": 0.0,
+      "timestamp_utc": "2026-08-20T04:24:55.988974+00:00",
+      "elapsed_seconds": 402.577253,
       "summary": {
+        "records": 35,
+        "errors": 0,
+        "primary_with_gate": {
+          "config": {
+            "threshold": 0.5,
+            "variant": "clean",
+            "doc_gate": true,
+            "k": 10
+          },
+          "queries_scored": 35,
+          "mrr_at_k": 0.0403,
+          "recall_at_1": 0.0286,
+          "hit_at_1": 0.0286,
+          "recall_at_3": 0.0286,
+          "hit_at_3": 0.0286,
+          "recall_at_5": 0.0571,
+          "hit_at_5": 0.0571,
+          "recall_at_10": 0.1143,
+          "hit_at_10": 0.1143
+        },
+        "primary_no_gate": {
+          "config": {
+            "threshold": 0.5,
+            "variant": "clean",
+            "doc_gate": false,
+            "k": 10
+          },
+          "queries_scored": 35,
+          "mrr_at_k": 0.0632,
+          "recall_at_1": 0.0571,
+          "hit_at_1": 0.0571,
+          "recall_at_3": 0.0571,
+          "hit_at_3": 0.0571,
+          "recall_at_5": 0.0571,
+          "hit_at_5": 0.0571,
+          "recall_at_10": 0.1143,
+          "hit_at_10": 0.1143
+        },
+        "gate_diagnostics": {
+          "queries": 35,
+          "mean_chunks_passing_gate": 5.34,
+          "queries_with_zero_passing": 4,
+          "queries_with_unresolvable_gold_doc": 0
+        },
         "metadata": {
-          "dataset": "x"
+          "dataset": "evaluation/datasets/financebench_filtered.json",
+          "dataset_version": "financebench_filtered.json|224337|1785761736",
+          "commit": "ad6a97ca0c5d110f6f48256d06378d1acafb92a9",
+          "timestamp": "2026-08-20T04:24:56.568605+00:00",
+          "hardware": "Darwin|25.5.0|arm64|arm|cpu=8",
+          "seed": 42,
+          "params": {
+            "k": 10,
+            "alpha": 0.7,
+            "threshold": 0.5,
+            "match_quarter": true,
+            "no_doc_gate": false,
+            "fusion_strategy": null
+          },
+          "source_repo": "https://github.com/czyssrs/FinanceBench"
         }
       },
       "config": {
-        "k": 10
+        "dataset": "evaluation/datasets/financebench_filtered.json",
+        "k": 10,
+        "alpha": 0.7,
+        "match_quarter": true,
+        "fusion_strategy": null,
+        "no_doc_gate": false
       },
       "error": null
     }

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Build a resumable, evaluation-only PostgreSQL index of table-row children."""
+"""Build a resumable, evaluation-only PostgreSQL index of table-row children.
+
+中文：建立可续跑的评测专用表格子行索引，并将进度与生产检索隔离；数据库操作
+只应针对显式的评测表，连接或嵌入条件不满足时应停止。
+"""
 
 from __future__ import annotations
 
@@ -323,6 +327,10 @@ def build_index(
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse evaluation-index options before connecting to PostgreSQL.
+
+    中文：参数不执行索引写入；连接、嵌入和评测表的失败边界由运行路径保留。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dsn", default=DATABASE_URL, help="PostgreSQL DSN")
     parser.add_argument("--tickers", nargs="+", help="Only index these tickers")
@@ -346,6 +354,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Build or resume the evaluation-only child index from the command line.
+
+    中文：入口只操作专用评测表；数据库错误不会被转换为看似完成的进度。
+    """
     args = parse_args(argv)
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")

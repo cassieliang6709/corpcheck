@@ -6,13 +6,15 @@ sheet, and cash-flow data for every ticker in the universe.
 
 All data is returned as plain Python dicts / lists ready for insertion into
 PostgreSQL via the db_loader.
+
+中文：该适配器把 yfinance 的 DataFrame 和不稳定字段名转换成稳定的字典结构；它不负责
+推导投资结论，也不在这里写数据库。
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from datetime import date
 from typing import Any
 
 import pandas as pd
@@ -40,7 +42,10 @@ CompanyInfo = dict[str, Any]
 # ---------------------------------------------------------------------------
 
 def _safe_float(value: Any) -> float | None:
-    """Convert a value to float, returning None on failure."""
+    """Convert a value to float, returning None on failure.
+
+    中文：供应商中的 NaN、空值和不可转换对象统一保留为数据库友好的 ``None``。
+    """
     try:
         if pd.isna(value):
             return None
@@ -50,6 +55,10 @@ def _safe_float(value: Any) -> float | None:
 
 
 def _safe_int(value: Any) -> int | None:
+    """Convert a value to int, returning None when it is missing or invalid.
+
+    中文：与 ``_safe_float`` 保持相同的缺失值语义，主要用于成交量等整数列。
+    """
     try:
         if pd.isna(value):
             return None
@@ -62,6 +71,8 @@ def _period_label(period_end: pd.Timestamp) -> str:
     """
     Convert a period-end Timestamp to a quarter label such as 'Q1',
     'Q2', 'Q3', or 'Q4'.
+
+    中文：按日历月份标记季度；不尝试推断公司可能不同的财政年度。
     """
     month = period_end.month
     if month <= 3:
@@ -77,6 +88,8 @@ def _get_df_value(df: pd.DataFrame, row_keys: list[str], col: pd.Timestamp) -> f
     """
     Try multiple possible row labels (to handle yfinance API variations)
     and return the first non-null float found for the given column.
+
+    中文：yfinance 会随报表或版本改变字段名，因此按候选优先级读取第一个有效值。
     """
     for key in row_keys:
         if key in df.index:
@@ -100,6 +113,8 @@ class MarketDownloader:
         ISO date strings for the download window.
     request_delay:
         Seconds to sleep between tickers to avoid rate-limiting.
+
+    中文：yfinance 适配层。每个公开方法把单个来源失败降级为空结果，使其他 ticker 可以继续。
     """
 
     def __init__(
@@ -119,6 +134,8 @@ class MarketDownloader:
     def get_company_info(self, ticker: str) -> CompanyInfo:
         """
         Return a dict suitable for inserting into the ``companies`` table.
+
+        中文：失败时使用项目内的公司元数据兜底，保证下游仍可拥有稳定的 ticker 记录。
         """
         try:
             tkr = yf.Ticker(ticker)
@@ -152,6 +169,8 @@ class MarketDownloader:
         """
         Return daily OHLCV rows for *ticker* over the configured date range.
         Each row is a dict matching the ``market_data`` table schema.
+
+        中文：价格会请求自动复权版本，所以 ``adj_close`` 复用返回的 ``Close`` 值。
         """
         rows: list[PriceRow] = []
         try:
@@ -201,6 +220,8 @@ class MarketDownloader:
         Return quarterly financial rows for *ticker*.
         Merges income statement, balance sheet, and cash-flow data by
         period-end date.
+
+        中文：同一报告期的三张表按日期合并；字段缺失保持 ``None``，而不是猜测数值。
         """
         rows: list[FinancialsRow] = []
         try:
@@ -344,6 +365,8 @@ class MarketDownloader:
         Download company info, price history, and financials for all
         *tickers* (default: ``ALL_TICKERS``).
 
+        中文：逐 ticker 处理并在请求间暂停；返回三类扁平记录，供加载层分别写表。
+
         Returns
         -------
         (company_infos, price_rows, financial_rows)
@@ -379,7 +402,10 @@ def download_market_data(
     start_date: str = START_DATE,
     end_date: str = END_DATE,
 ) -> tuple[list[CompanyInfo], list[PriceRow], list[FinancialsRow]]:
-    """Shorthand for ``MarketDownloader().download_all()``."""
+    """Shorthand for ``MarketDownloader().download_all()``.
+
+    中文：适合一次性脚本；需要调整请求节流时请实例化下载器。
+    """
     dl = MarketDownloader(start_date=start_date, end_date=end_date)
     return dl.download_all(tickers)
 

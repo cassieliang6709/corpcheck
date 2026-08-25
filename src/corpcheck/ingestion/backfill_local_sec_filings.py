@@ -1,5 +1,7 @@
 """
 Backfill local SEC filings that already exist on disk.
+
+中文：重用已下载的 EDGAR 文件完成清洗、分块和入库，避免为修复数据库再次请求 SEC。
 """
 
 from __future__ import annotations
@@ -25,6 +27,10 @@ DEFAULT_LOCAL_SEC_FILING_TYPES = ["10-K", "10-Q"]
 
 
 def _discover_local_tickers(download_dir: str) -> list[str]:
+    """Return ticker-like filing directories already present in the local SEC cache.
+
+    中文：目录不存在时返回空列表，让 CLI 以明确错误退出而不是创建目录。
+    """
     root = Path(download_dir) / "sec-edgar-filings"
     if not root.exists():
         return []
@@ -32,6 +38,10 @@ def _discover_local_tickers(download_dir: str) -> list[str]:
 
 
 def _existing_filing_keys(dsn: str, tickers: list[str]) -> set[tuple[str, str, int, str]]:
+    """Read database identity keys used to skip filings that were already loaded.
+
+    中文：键与 ``filings`` 的自然业务身份一致，不依赖本地文件的偶然路径。
+    """
     with psycopg2.connect(dsn) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -46,6 +56,10 @@ def _existing_filing_keys(dsn: str, tickers: list[str]) -> set[tuple[str, str, i
 
 
 def main() -> None:
+    """Run the local-filing recovery command.
+
+    中文：默认仅处理数据库缺失的文件；``--include-existing`` 才允许重新生成已有记录。
+    """
     parser = argparse.ArgumentParser(description="Backfill local SEC filings already present on disk")
     parser.add_argument("--tickers", nargs="+", default=None, help="Tickers to process; defaults to all local SEC tickers")
     parser.add_argument("--years", nargs="+", type=int, default=None, help="Years to process; defaults to 2018-2025")

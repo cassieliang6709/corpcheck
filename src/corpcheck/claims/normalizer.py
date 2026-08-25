@@ -1,4 +1,7 @@
-"""Deterministic claim normalizer for financial statements and comments."""
+"""Deterministically turn financial prose into separately checkable claims.
+
+中文：本模块不用 LLM；它以稳定的规则识别数字、指标和期间，让同一输入得到可复现的声明 ID 与元数据。
+"""
 
 from __future__ import annotations
 
@@ -145,12 +148,20 @@ _CLAIM_KEYWORDS = {
 
 
 def _canonical_id(claim_text: str, company_name: Optional[str] = None) -> str:
+    """Create a stable short ID from normalized claim identity.
+
+    中文：ID 只依赖公司和声明文本，便于跨运行关联同一逻辑声明；批次序号在调用方追加。
+    """
     raw = f"{(company_name or '').strip()}::{claim_text.strip().lower()}"
     digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
     return f"claim_{digest}"
 
 
 def normalize_text(text: str) -> str:
+    """Canonicalize quotes and whitespace without changing semantic content.
+
+    中文：统一排版使拆分、去重和哈希不受复制粘贴的弯引号或连续空白影响。
+    """
     cleaned = text.replace("\u201c", '"').replace("\u201d", '"')
     cleaned = cleaned.replace("\u2018", "'").replace("\u2019", "'")
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t")
@@ -158,6 +169,10 @@ def normalize_text(text: str) -> str:
 
 
 def split_atomic_claims(text: str) -> list[str]:
+    """Split prose into de-duplicated sentence- or coordination-level claims.
+
+    中文：一条句子可能含多个可核验事实；此处保守拆分，再按小写文本去重以避免重复检索。
+    """
     normalized = normalize_text(text)
     pieces = [segment.strip() for segment in _SENTENCE_SPLIT.split(normalized)]
     pieces = [p for p in pieces if p]
@@ -185,11 +200,19 @@ def split_atomic_claims(text: str) -> list[str]:
 
 
 def _is_prediction(claim: str) -> bool:
+    """Recognize forward-looking wording before other claim-type heuristics.
+
+    中文：预测需要未来证据，优先识别可避免误标为当前可验证的数值陈述。
+    """
     lower = claim.lower()
     return any(k in lower for k in _PREDICTION_KEYWORDS)
 
 
 def _guess_claim_type(claim: str) -> str:
+    """Assign the conservative claim category used by the verification policy.
+
+    中文：类别是规则路由信号而非语义理解；无法确定时选择最常见且可审计的叙述披露。
+    """
     lower = claim.lower()
     if _is_prediction(claim):
         return "prediction"
@@ -210,6 +233,10 @@ def _guess_claim_type(claim: str) -> str:
 
 
 def _guess_checkability(claim: str, claim_type: str, company: Optional[str]) -> str:
+    """Map claim type and issuer context to an immediate verification policy.
+
+    中文：预测标为稍后观察、主观看法不可验证；缺少公司时不把检索结果误当成确定证据。
+    """
     if claim_type == "prediction":
         return "watch_later"
     if claim_type == "opinion":
@@ -225,6 +252,10 @@ def _guess_checkability(claim: str, claim_type: str, company: Optional[str]) -> 
 
 
 def _normalize_unit(unit: Optional[str]) -> Optional[str]:
+    """Map spelling variants to the unit labels understood by comparison rules.
+
+    中文：单位规范化只统一等价写法，不换算数值；金额倍率在数字提取阶段处理。
+    """
     if not unit:
         return None
     lowered = unit.lower().strip().strip(". ")
@@ -241,6 +272,10 @@ def _normalize_unit(unit: Optional[str]) -> Optional[str]:
 
 
 def _looks_like_year(value: str, claim: str, start: int, end: int) -> bool:
+    """Exclude four-digit period labels from evidence-number extraction.
+
+    中文：年份通常是时间元数据而非待核验数值，附近有期间词时宁可跳过以减少误绑定。
+    """
     if len(value) != 4:
         return False
     try:
@@ -272,6 +307,10 @@ def _looks_like_year(value: str, claim: str, start: int, end: int) -> bool:
 
 
 def _coerce_decimal(value: str) -> Optional[Decimal]:
+    """Parse a displayed numeric token without raising on malformed input.
+
+    中文：声明提取不应因单个脏文本中断整个批次；无法解析的候选由调用方忽略。
+    """
     try:
         return Decimal(value.replace(",", ""))
     except (InvalidOperation, ValueError):
@@ -279,7 +318,10 @@ def _coerce_decimal(value: str) -> Optional[Decimal]:
 
 
 def extract_numeric_bindings(text: str) -> list[tuple[Decimal, Optional[str], str]]:
-    """Return candidate numeric bindings as (value, unit, raw) in sentence order."""
+    """Return ``(value, unit, raw)`` numeric candidates in text order.
+
+    中文：这是 span 版本的轻量接口，适合只关心数值和单位、不关心原文位置的调用方。
+    """
     return [(v, u, raw) for v, u, raw, _s, _e in extract_numeric_bindings_with_spans(text)]
 
 
@@ -290,6 +332,8 @@ def extract_numeric_bindings_with_spans(
 
     The span is what lets the verifier check *which* metric a number sits next
     to, instead of accepting any number that appears somewhere in the chunk.
+
+    中文：字符位置使核验器能把数字绑定到附近指标，避免把同一段中的任意数字当作证据。
     """
     if not text:
         return []
@@ -339,6 +383,10 @@ def extract_numeric_bindings_with_spans(
 def _extract_primary_numeric_binding(
     claim: str,
 ) -> tuple[Optional[Decimal], Optional[str], Optional[str]]:
+    """Choose one representative number for a claim, preferring explicit units.
+
+    中文：当前声明模型只有一个主数值；金额或百分比等带单位候选比裸数字更可靠。
+    """
     candidates = extract_numeric_bindings(claim)
     if not candidates:
         return None, None, None
@@ -350,6 +398,10 @@ def _extract_primary_numeric_binding(
 
 
 def normalize_claims(req: ClaimEvaluationRequest) -> list[FinancialClaim]:
+    """Build deterministic claim records from an API request.
+
+    中文：一次完成拆分、分类、期间/指标/数值提取；不检索、不调用模型，也不作真伪判断。
+    """
     as_of = req.as_of or datetime.now(tz=UTC)
     claims = []
 
@@ -387,6 +439,8 @@ def find_metric_mentions(text: str) -> list[tuple[int, int, str]]:
     Longest aliases are matched first and overlapping shorter aliases are
     dropped, so "total net sales" produces one ``revenue`` mention rather than
     also matching the nested "net sales" and "sales".
+
+    中文：按最长别名优先并消除重叠，确保后续数字绑定只有一个明确指标候选。
     """
     if not text:
         return []
@@ -413,6 +467,8 @@ def _extract_metric(claim: str) -> Optional[str]:
 
     Returning None is meaningful: the verifier treats an unidentified metric as
     a hard stop rather than matching any number it happens to find.
+
+    中文：未知指标显式返回 None，核验器会拒绝“任意数字都能证明”的不安全推断。
     """
     mentions = find_metric_mentions(claim)
     if not mentions:
@@ -421,7 +477,10 @@ def _extract_metric(claim: str) -> Optional[str]:
 
 
 def parse_fiscal_period(text: str) -> Optional[tuple[int, Optional[int]]]:
-    """Parse ``(fiscal_year, quarter)`` from claim text; quarter may be None."""
+    """Parse ``(fiscal_year, quarter)`` from claim text; quarter may be absent.
+
+    中文：只识别明确的财年和季度语法；普通四位数字不自动当作期间。
+    """
     if not text:
         return None
 
@@ -449,6 +508,10 @@ def parse_fiscal_period(text: str) -> Optional[tuple[int, Optional[int]]]:
 
 
 def format_fiscal_period(period: Optional[tuple[int, Optional[int]]]) -> Optional[str]:
+    """Render a parsed period in the stable ``FYyyyy`` / ``FYyyyyQq`` form.
+
+    中文：输出用于声明元数据和 API 响应，不承担新的期间推断。
+    """
     if period is None:
         return None
     year, quarter = period
@@ -456,6 +519,10 @@ def format_fiscal_period(period: Optional[tuple[int, Optional[int]]]) -> Optiona
 
 
 def _extract_comparator(claim: str) -> Optional[str]:
+    """Infer the comparison operator that a numeric claim asserts, if any.
+
+    中文：没有比较词时返回 None，调用方把它当作相等性判断而不是擅自选择不等式。
+    """
     lowered = claim.lower()
     if " above " in lowered or " > " in lowered or ">" in lowered:
         return "gt"

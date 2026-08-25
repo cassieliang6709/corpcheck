@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Paired, read-only retrieval gate for two corpus representations.
 
+中文：以相同问题和检索路径比较两份明确指定的语料表示。它先验证数据库身份、嵌入
+完整性与环境一致性，避免把基础设施差异误判为检索回归。
+
 The runner compares the production question-only retrieval path against two
 explicit PostgreSQL databases.  It is evaluation-only: it does not ingest,
 mutate schemas, or select benchmark metadata as retrieval filters.
@@ -57,6 +60,11 @@ class GateError(RuntimeError):
 
 @dataclass(frozen=True)
 class CorpusSnapshot:
+    """Identity sets and embedding coverage for one read-only corpus endpoint.
+
+    中文：成对评测前采集的语料身份与向量完整性快照，用于将表示差异与数据漂移分开。
+    """
+
     companies: frozenset[tuple[str, str]]
     filings: frozenset[tuple[Any, ...]]
     chunk_count: int
@@ -74,6 +82,10 @@ def _canonical_database_target(database_url: str) -> tuple[str, str, int, str]:
 
 
 def validate_distinct_urls(old_url: str, new_url: str) -> None:
+    """Reject a comparison whose two URLs resolve to the same database target.
+
+    中文：成对门禁必须比较不同的显式端点，避免把同一语料误报告为一次有效 A/B。
+    """
     if _canonical_database_target(old_url) == _canonical_database_target(new_url):
         raise GateError("old and new database URLs resolve to the same target")
 
@@ -84,6 +96,10 @@ async def _init_connection(connection: asyncpg.Connection) -> None:
 
 
 async def create_pool(database_url: str) -> asyncpg.Pool:
+    """Create a read-only evaluation pool with the existing connection setup.
+
+    中文：连接失败保持显式，调用方不能在缺少一个端点时退化为单库评测。
+    """
     return await asyncpg.create_pool(
         dsn=database_url,
         min_size=1,
@@ -93,6 +109,10 @@ async def create_pool(database_url: str) -> asyncpg.Pool:
 
 
 async def runtime_database_identity(pool: Any) -> tuple[str, str, int]:
+    """Read the server and database identity used to enforce comparison isolation.
+
+    中文：运行时身份优先于 URL 文本，防止不同连接字符串掩盖同一个实际数据库。
+    """
     row = await pool.fetchrow(
         "SELECT current_database() AS database, "
         "COALESCE(inet_server_addr()::text, 'local-socket') AS address, "
@@ -102,6 +122,10 @@ async def runtime_database_identity(pool: Any) -> tuple[str, str, int]:
 
 
 async def retrieval_environment_fingerprint(pool: Any) -> str:
+    """Return the database-side fingerprint that affects comparable retrieval.
+
+    中文：环境指纹不一致时结果不可归因于表示差异，因此门禁会拒绝继续。
+    """
     rows = await pool.fetch(
         """
         SELECT 'index' AS kind,
@@ -127,6 +151,10 @@ async def retrieval_environment_fingerprint(pool: Any) -> str:
 
 
 async def corpus_snapshot(pool: Any) -> CorpusSnapshot:
+    """Collect identity sets and embedding coverage before paired retrieval.
+
+    中文：评测先固定每端语料状态，避免在数据不完整或漂移时比较分数。
+    """
     company_rows = await pool.fetch("SELECT ticker, name FROM companies")
     filing_rows = await pool.fetch(
         """
@@ -163,6 +191,10 @@ async def corpus_snapshot(pool: Any) -> CorpusSnapshot:
 
 
 def assert_identity_sets_match(old: CorpusSnapshot, new: CorpusSnapshot) -> None:
+    """Fail when paired corpora do not contain the same filing identities.
+
+    中文：数据集合不一致意味着无法将指标变化归因于检索表示。
+    """
     if old.companies != new.companies:
         raise GateError(
             "company identity sets differ "
@@ -178,6 +210,10 @@ def assert_identity_sets_match(old: CorpusSnapshot, new: CorpusSnapshot) -> None
 
 
 def assert_complete_embeddings(snapshot: CorpusSnapshot, *, label: str) -> None:
+    """Fail when any snapshot chunk lacks an embedding required for retrieval.
+
+    中文：向量覆盖不完整会改变候选集，不能与完整语料作公平比较。
+    """
     if snapshot.chunk_count <= 0:
         raise GateError(f"{label} corpus contains no SEC chunks")
     if snapshot.embedded_chunk_count != snapshot.chunk_count:
@@ -199,11 +235,19 @@ def assert_same_database_server(
 
 
 def assert_same_retrieval_environment(old: str, new: str) -> None:
+    """Fail when database-side retrieval configuration differs between endpoints.
+
+    中文：此检查防止索引或扩展配置差异被误判为语料表示收益。
+    """
     if old != new:
         raise GateError("old and new retrieval schema/index fingerprints differ")
 
 
 def identity_digest(snapshot: CorpusSnapshot) -> str:
+    """Serialize a stable digest for a corpus identity snapshot.
+
+    中文：报告使用摘要而不是隐式全量状态，便于复核两次评测是否基于同一语料。
+    """
     filing_rows = [
         json.dumps(
             [str(value) if value is not None else None for value in item],
@@ -220,6 +264,10 @@ def identity_digest(snapshot: CorpusSnapshot) -> str:
 
 
 def nearest_rank_p95(samples: Sequence[float]) -> float:
+    """Return the existing nearest-rank p95 latency statistic for report stability.
+
+    中文：计算规则保持固定；样本为空或无效时由现有验证路径拒绝。
+    """
     if not samples:
         raise GateError("cannot compute p95 without measured samples")
     ordered = sorted(float(value) for value in samples)
@@ -257,6 +305,10 @@ async def oracle_summary(pool: Any, rows: list[dict[str, Any]]) -> dict[str, Any
 
 
 def load_dataset(path: Path) -> tuple[list[dict[str, Any]], str]:
+    """Load the frozen evaluation rows and their content digest.
+
+    中文：数据文件错误或记录漂移不应被静默跳过，否则成对比较不再可复现。
+    """
     raw = path.read_bytes()
     try:
         rows = json.loads(raw)
@@ -415,6 +467,10 @@ async def run_paired_measurements(
 
 
 def summarize(rounds: list[list[Any]], latency_samples: list[float]) -> dict[str, Any]:
+    """Aggregate paired observations into the existing stable report fields.
+
+    中文：汇总不改变样本或阈值，输入结构不完整时继续交由调用方的校验处理。
+    """
     round_summaries = []
     for round_index, records in enumerate(rounds, start=1):
         strict = score_records(
@@ -504,6 +560,10 @@ def write_report(path: Path, report: dict[str, Any]) -> None:
 
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
+    """Validate prerequisites, measure both endpoints, and assemble the gate report.
+
+    中文：这是 fail-closed 编排层；任何身份、数据或检索前置条件失败都会中止。
+    """
     validate_distinct_urls(args.old_db_url, args.new_db_url)
     rows, dataset_sha256 = load_dataset(args.dataset)
     validate_dataset_contract(args.gate_profile, rows, dataset_sha256)
@@ -613,6 +673,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse paired read-only gate configuration without creating pools.
+
+    中文：只定义两端语料与报告路径；端点身份、嵌入覆盖和检索环境仍在运行前验证。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--old-db-url", required=True)
     parser.add_argument("--new-db-url", required=True)
@@ -642,6 +706,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Run the asynchronous paired retrieval gate with a clear CLI boundary.
+
+    中文：入口不能绕过双端一致性检查；比较前提不成立时不会写出通过结论。
+    """
     args = parse_args(argv)
     try:
         report = asyncio.run(run(args))

@@ -16,6 +16,9 @@ Three tools, in the order an honest agent should use them:
 All three call :func:`corpcheck.retrieval.pipeline.retrieve`. None of them
 reimplements search, ranking, or the revision filter — the whole point of the
 single-entry-point rule is that the offline IR numbers describe this path too.
+
+中文：MCP 工具是检索系统的协议适配层，不复制查询或修订策略；先判定可回答再读取证据，
+以便代理保守引用。
 """
 
 from __future__ import annotations
@@ -72,7 +75,10 @@ _SEARCH_SNIPPET_CHARS = 2000
 
 
 def _corpus_governance() -> dict[str, Any]:
-    """State the governance actually in force, so a client never has to assume it."""
+    """Report the revision-governance mode currently enforced by the server.
+
+    中文：把运行时开关显式带回给客户端，避免它误以为所有结果均已排除修订前内容。
+    """
     return {
         "revision_filter_enabled": config.REVISION_FILTER_ENABLED,
         "note": (
@@ -92,6 +98,8 @@ def _coverage(chunks: list[ChunkResult]) -> dict[str, Any]:
     situation from the same similarity spread over three companies and two fiscal
     years, and the caller is better placed than this server to decide which it
     needed.
+
+    中文：覆盖信息补充单一分数无法表达的来源多样性，具体是否足够由调用代理按任务决定。
     """
     return {
         "retrieved": len(chunks),
@@ -113,6 +121,8 @@ def _gate_status(
     same decision into a stable machine-readable code without duplicating the
     thresholds — the codes are derived from the identical similarity list the gate
     reads.
+
+    中文：状态码来自与拒答门控相同的输入，不复制阈值逻辑，从而保证诊断和实际裁决一致。
     """
     if decision is not None:
         return decision.status
@@ -130,6 +140,10 @@ def _gate_status(
 
 @asynccontextmanager
 async def _lifespan(_server: MCPServer) -> AsyncIterator[None]:
+    """Warm shared retrieval dependencies before accepting MCP tool calls.
+
+    中文：MCP 与 HTTP 启动相同的公司缓存和嵌入模型，避免首个工具请求变慢或与 HTTP 排序不一致。
+    """
     pool = await get_pool()
     # Company-name → ticker caches back the in-query company detection that
     # retrieve() relies on. Skipping this would silently degrade ranking on the
@@ -148,6 +162,11 @@ async def _lifespan(_server: MCPServer) -> AsyncIterator[None]:
 
 
 def build_server() -> MCPServer:
+    """Construct the configured stdio MCP server and register its three tools.
+
+    中文：工具的 decorator 参数属于 MCP schema 契约；业务解释应写在函数体注释或
+    本函数文档中，而非工具 docstring。
+    """
     server = MCPServer(
         name="corpcheck",
         title="CorpCheck — SEC filing evidence",
@@ -182,6 +201,8 @@ def build_server() -> MCPServer:
             Optional[int], Field(description="Restrict to a fiscal year.")
         ] = None,
     ) -> dict[str, Any]:
+        # This tool intentionally stops before generation. 中文：先公开相同的门控测量值，
+        # 让代理在证据不足时拒答，而不是从先验知识补全。
         pool = await get_pool()
         chunks = await retrieve(
             pool=pool,
@@ -246,6 +267,8 @@ def build_server() -> MCPServer:
             Field(ge=0.0, le=1.0, description="Dense/sparse blend weight."),
         ] = config.DEFAULT_ALPHA,
     ) -> dict[str, Any]:
+        # Enrich only after ranking to keep retrieval hot path lean. 中文：排序完成后再批量
+        # 查询 accession 等溯源字段，不让每次检索都承担工具专属的 join 成本。
         pool = await get_pool()
         chunks = await retrieve(
             pool=pool,
@@ -306,6 +329,8 @@ def build_server() -> MCPServer:
             Field(ge=1, le=40, description="Cap on returned chunks (accession mode)."),
         ] = 10,
     ) -> dict[str, Any]:
+        # Exactly one locator prevents ambiguous document scope. 中文：chunk 与 accession
+        # 分别代表局部窗口和整份文件起点，二者不能同时使用。
         if not chunk_id and not accession_number:
             return {"error": "Provide either chunk_id or accession_number."}
         if chunk_id and accession_number:
@@ -447,7 +472,10 @@ def build_server() -> MCPServer:
 
 
 def main() -> None:
-    """Console-script entry point. stdio transport only."""
+    """Run the console-script entry point over the stdio JSON-RPC transport.
+
+    中文：stdout 是协议数据流，调用方不得向其输出普通日志。
+    """
     build_server().run(transport="stdio")
 
 

@@ -3,6 +3,8 @@
 The caches here are process-global and populated once at startup by
 :func:`load_known_tickers`. They are read-only after that, so the retrieval path
 can consult them without touching the database per request.
+
+中文：启动时加载的全局缓存只读；解析阶段做保守的公司、文件类型和财年识别，不负责最终过滤或排序。
 """
 
 from __future__ import annotations
@@ -110,10 +112,18 @@ _GENERIC_POSSESSIVE_NAMES = {"company", "filing", "issuer", "management"}
 
 
 def _normalize_company_text(text: str) -> str:
+    """Canonicalize a company name for alias-map keys.
+
+    中文：仅保留小写字母数字和单空格，使标点、大小写和空白差异不影响别名匹配。
+    """
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
 
 
 def _generate_company_aliases(company_name: str) -> set[str]:
+    """Derive conservative searchable aliases for one canonical company name.
+
+    中文：生成完整名、去公司后缀和足够长的首词等别名；冲突别名会在缓存加载时被剔除。
+    """
     normalized = _normalize_company_text(company_name)
     if not normalized:
         return set()
@@ -156,7 +166,10 @@ def _generate_company_aliases(company_name: str) -> set[str]:
 
 
 async def load_known_tickers(pool: asyncpg.Pool) -> None:
-    """Populate ticker and company-name caches from the database."""
+    """Populate immutable ticker and unambiguous company-alias caches from the DB.
+
+    中文：同一别名若对应多个股票代码则不注册，宁可不识别也不把查询静默指向错误公司。
+    """
     global _known_tickers, _company_name_to_ticker, _company_alias_to_ticker
     global _ticker_to_company_names, _ticker_to_company_aliases
     async with pool.acquire() as conn:
@@ -197,7 +210,10 @@ async def load_known_tickers(pool: asyncpg.Pool) -> None:
 
 
 def resolve_company_filter(company: Optional[str]) -> Optional[str]:
-    """Resolve a company filter to its canonical ticker when possible."""
+    """Resolve an explicit company filter to a canonical ticker when possible.
+
+    中文：无法解析时保留原输入，让 SQL 层仍可尝试匹配公司全名而非丢弃用户过滤条件。
+    """
     if company is None:
         return None
 
@@ -221,6 +237,8 @@ def detect_company_in_query(query: str) -> Optional[str]:
 
     Scans the original query (not uppercased) so only tokens already written in
     ALL-CAPS match — avoids false positives like 'are' → 'ARE' (a real ticker).
+
+    中文：优先严格股票代码，再尝试混合大小写缩写和唯一公司别名，以平衡召回和误判。
     """
     for match in _TICKER_RE.finditer(query):
         if match.group(1) in _known_tickers:
@@ -249,6 +267,8 @@ def detect_unresolved_company_in_query(query: str) -> Optional[str]:
     question may not name a company at all. This deliberately conservative
     detector only distinguishes the unknown-company case when SEC-filing intent
     and possessive proper-name syntax occur together.
+
+    中文：只有“明确 SEC 意图 + 所有格专名”才报未知公司，避免把普通大写词误判为发行人。
     """
     if detect_company_in_query(query) is not None:
         return None
@@ -266,6 +286,8 @@ def detect_filing_type_in_query(query: str) -> Optional[str]:
     """Return an explicit filing-type match when the query clearly names one type.
 
     Returns None for ambiguous queries that mention multiple filing types.
+
+    中文：多个文件类型同时出现时不强行选择，调用方可继续进行不受类型限制的检索。
     """
     matches = {
         filing_type
@@ -276,7 +298,10 @@ def detect_filing_type_in_query(query: str) -> Optional[str]:
 
 
 def detect_filing_type_hint_in_query(query: str) -> Optional[str]:
-    """Infer a likely filing type from weaker annual/quarter signals for boosting only."""
+    """Infer a likely filing type from weak annual/quarter hints for boosting only.
+
+    中文：弱信号只影响排序加权，绝不作为硬过滤条件，以免误删相关证据。
+    """
     explicit_match = detect_filing_type_in_query(query)
     if explicit_match is not None:
         return explicit_match
@@ -292,7 +317,10 @@ def detect_filing_type_hint_in_query(query: str) -> Optional[str]:
 
 
 def _expand_range(start: int, end: int, years: set[int]) -> None:
-    """Add every year in an inclusive range, ignoring implausibly large spans."""
+    """Add a bounded inclusive year range to ``years``.
+
+    中文：超过十年的范围不展开，防止模糊文本把整个语料库都当作年份加权目标。
+    """
     if start > end:
         start, end = end, start
     # Keep expansion bounded to avoid boosting a span that covers the corpus.
@@ -306,6 +334,8 @@ def detect_years_in_query(query: str) -> list[str]:
     Handles the notations that appear in real analyst questions: bare ``2019``,
     ``FY2019``, the two-digit ``FY19``, quarterly ``Q2 2023`` / ``Q22023``, and
     ranges written either way (``FY2018 - FY2020``, ``FY20 to FY21``).
+
+    中文：结果排序且去重，供过滤覆盖检查和 SQL boost 共用；它不是严格的自然语言时间解析器。
     """
     years: set[int] = set()
 
@@ -332,7 +362,10 @@ def detect_years_in_query(query: str) -> list[str]:
 
 
 def detect_year_in_query(query: str) -> Optional[str]:
-    """Return the first detected year for backwards compatibility."""
+    """Return the first detected year for backwards compatibility.
+
+    中文：新代码应使用支持多年的 ``detect_years_in_query``；该包装器只维持旧接口。
+    """
     years = detect_years_in_query(query)
     return years[0] if years else None
 
@@ -343,6 +376,8 @@ def sanitize_bm25_query(query: str, company: Optional[str]) -> str:
     This prevents queries like "AMZN revenue 2019 vs 2018" with company="AMZN"
     from producing an empty tsquery branch just because AMZN never appears in the
     chunk text. If cleanup removes everything, fall back to the original query.
+
+    中文：公司已被 SQL 硬过滤时移除它的名称，避免词项未出现在正文而使稀疏检索分支为空。
     """
     if not company:
         return query
@@ -369,6 +404,10 @@ def sanitize_bm25_query(query: str, company: Optional[str]) -> str:
 
 
 def query_prefers_quantitative_chunks(query: str) -> bool:
+    """Heuristically detect questions that benefit from numerical/table evidence.
+
+    中文：这是候选过取和重排的软信号，不改变用户的过滤边界，也不保证问题一定是数值题。
+    """
     lowered = query.lower()
     keywords = (
         "revenue",
@@ -396,6 +435,10 @@ def query_prefers_quantitative_chunks(query: str) -> bool:
 
 
 def query_prefers_explanatory_chunks(query: str) -> bool:
+    """Heuristically detect questions that favor narrative explanatory evidence.
+
+    中文：这是轻量重排信号，用于让风险、原因和策略类披露更容易进入结果集。
+    """
     lowered = query.lower()
     keywords = (
         "why",

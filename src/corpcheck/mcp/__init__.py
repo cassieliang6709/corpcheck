@@ -7,6 +7,8 @@ session sees is exactly what ``evaluation/ir_eval.py`` measures. If those two ev
 diverge, the evaluation numbers stop describing the product.
 
 Run it with ``python -m corpcheck.mcp`` or the ``corpcheck-mcp`` console script.
+
+中文：MCP 只适配协议和补充溯源信息；所有工具共用 HTTP 与评估使用的检索入口，避免形成第二套排序逻辑。
 """
 
 from corpcheck.mcp.server import build_server, main

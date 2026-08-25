@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Build inspectable row-level search children from structured table chunks.
 
+中文：这是可观察的表格行级检索表示实验，输出用于检查切分效果而不进入生产索引；
+输入格式不合法会显式失败，避免生成看似有效的行级样本。
+
 This is an evaluation-only representation prototype. It does not write to the
 database or change production retrieval.
 
@@ -156,6 +159,10 @@ def _write_children(children: Iterable[TableChild], stream: TextIO) -> None:
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse JSONL prototype input/output paths without consuming the stream.
+
+    中文：只定义行级实验的 I/O；无效 JSONL 在实际读取时显式失败，避免部分静默转换。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="JSONL parent records")
     parser.add_argument("--output", type=Path, help="Output JSONL; defaults to stdout")
@@ -163,6 +170,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Convert parent records to inspectable child rows and return CLI status.
+
+    中文：入口仅写明确指定的实验输出，不修改数据库或生产检索索引。
+    """
     args = parse_args(argv)
     try:
         children = children_from_parent_records(_read_jsonl(args.input))

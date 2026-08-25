@@ -1,3 +1,9 @@
+"""Pydantic request and response contracts for the HTTP service.
+
+中文：这些模型定义公开 JSON Schema；字段、默认值、描述和类 docstring 均可能成为
+兼容性契约，文档化优先使用普通注释。
+"""
+
 from datetime import date
 from typing import Literal, Optional
 
@@ -26,6 +32,8 @@ class ChunkResult(BaseModel):
     # ``cos_sim`` is the one field on the row that survives on an absolute
     # scale, which is what makes confidence gating possible. None when the chunk
     # was found only by the sparse arm.
+    # 中文：该字段保留未加权的 dense 相似度；融合后的 score 仅适合同一响应内排序，
+    # 不能作绝对置信度阈值。
     cos_sim: Optional[float] = None
     company: str
     sector: Optional[str] = None
@@ -110,6 +118,7 @@ class ChatResponse(BaseModel):
     # consulted. ``answer`` then holds the refusal text and ``chunks`` still
     # carries what was retrieved, so a caller can show the user the evidence
     # that was judged insufficient. Defaults keep existing clients working.
+    # 中文：拒答也返回已检索片段，便于客户端解释证据为何不足；默认值维持旧客户端兼容。
     abstained: bool = False
     abstain_reason: Optional[str] = None
 

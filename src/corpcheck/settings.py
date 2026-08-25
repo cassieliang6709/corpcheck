@@ -5,6 +5,8 @@ module owns the company universe, year ranges, and chunking hyperparameters. Thi
 module owns everything the query-time path needs.
 
 Shell environment variables always take precedence over the `.env` file.
+
+中文：这里仅保存查询时需要的环境配置。环境变量优先于 `.env`，避免部署配置被本地文件意外覆盖。
 """
 
 from __future__ import annotations
@@ -17,15 +19,26 @@ load_dotenv()
 
 
 def _env_float(name: str, default: float) -> float:
+    """Read one float setting, using ``default`` when it is unset.
+
+    中文：集中处理环境变量转换，确保配置模块的常量始终是浮点数。
+    """
     return float(os.getenv(name, str(default)))
 
 
 def _env_int(name: str, default: int) -> int:
+    """Read one integer setting, using ``default`` when it is unset.
+
+    中文：集中处理整数转换；无环境变量时保留代码中的安全默认值。
+    """
     return int(os.getenv(name, str(default)))
 
 
 def _env_bool(name: str, default: bool) -> bool:
-    """Parse a boolean env var. Anything unrecognised falls back to ``default``."""
+    """Parse a boolean env var; unrecognised values fall back to ``default``.
+
+    中文：仅接受常见的开关拼写，未知值不猜测，回退到调用方的默认值。
+    """
     raw = os.getenv(name)
     if raw is None:
         return default

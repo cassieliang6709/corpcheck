@@ -1,4 +1,8 @@
-"""Build the manually curated FinanceBench final-answer evaluation gold."""
+"""Build the manually curated FinanceBench final-answer evaluation gold.
+
+中文：将人工审阅过的 FinanceBench 要求转为稳定、可检查的最终答案金标；
+该脚本不推断答案，缺失或冲突的人工标注应当失败而非被静默补全。
+"""
 
 from __future__ import annotations
 
@@ -232,6 +236,10 @@ def write_json(path: Path, records: list[dict[str, Any]]) -> None:
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse curated-gold input and output paths before any file is written.
+
+    中文：参数解析不修改金标；输入或输出契约问题会在后续显式校验中失败。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
@@ -242,6 +250,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Build the reviewed answer gold and expose failures as a nonzero status.
+
+    中文：入口不会猜测缺失人工标注；源数据或冻结写入约束不满足时停止。
+    """
     args = parse_args(argv)
     answer_gold, exclusions = build_records(read_source(args.input))
     write_json(args.output, answer_gold)

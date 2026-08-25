@@ -3,6 +3,8 @@
 Both retrievers read from the ``v_retrieval_chunks`` view and share the same
 metadata filter and boost machinery, so their candidate sets are directly
 comparable before fusion.
+
+中文：本模块只生成数据库候选及其原始/加权分数；融合、修订过滤和响应模型转换由上层管线负责。
 """
 
 from __future__ import annotations
@@ -47,6 +49,10 @@ _SELECT_COLUMNS = """
 
 
 def get_model() -> SentenceTransformer:
+    """Return the process-cached embedding model, loading it on first use.
+
+    中文：模型对象昂贵且可复用，因此进程内只创建一次；启动路径可主动调用以尽早暴露配置错误。
+    """
     global _model
     if _model is None:
         logger.info("Loading embedding model %s", EMBEDDING_MODEL)
@@ -55,6 +61,10 @@ def get_model() -> SentenceTransformer:
 
 
 def embed_query(query: str) -> list[float]:
+    """Embed one query with L2 normalization for cosine-distance search.
+
+    中文：归一化使 pgvector 的余弦距离与跨查询的相似度阈值具有一致含义。
+    """
     return get_model().encode(query, normalize_embeddings=True).tolist()
 
 
@@ -64,10 +74,12 @@ def build_boost_expression(
     boost_years: list[str],
     start_idx: int,
 ) -> tuple[str, list, int]:
-    """Return a SQL multiplicative boost expression, its positional param values, and next index.
+    """Build a SQL boost expression, positional parameter values, and next index.
 
     Boost values are inlined as float literals (server-controlled config); only the
     comparison values (ticker, filing_type, years) are parameterised for safety.
+
+    中文：配置中的 boost 数值可信并内联；用户相关的公司、文件和年份始终作为 SQL 参数传入。
     """
     parts: list[str] = []
     values: list = []
@@ -97,7 +109,10 @@ def build_filter_clause(
     filing_type: Optional[str],
     fiscal_year: Optional[int],
 ) -> tuple[str, dict]:
-    """Return a SQL WHERE fragment using :name placeholders, and a params dict."""
+    """Build an optional SQL WHERE fragment with named intermediate placeholders.
+
+    中文：先保留可读的 ``:name`` 占位符，再由 ``apply_filter`` 转换为 asyncpg 的位置参数。
+    """
     conditions: list[str] = []
     params: dict[str, Union[str, int]] = {}
     if sector is not None:
@@ -121,7 +136,10 @@ def apply_filter(
     params: dict,
     next_idx: int,
 ) -> tuple[str, list, int]:
-    """Replace :name placeholders with $N positional params for asyncpg."""
+    """Replace named placeholders with asyncpg ``$N`` parameters.
+
+    中文：返回替换后的 SQL、按出现顺序的值和下一个参数索引；不拼接用户值到 SQL 文本。
+    """
     positional_where = where
     values: list = []
     idx = next_idx
@@ -143,7 +161,10 @@ async def vector_search(
     boost_filing_type: Optional[str] = None,
     boost_years: Optional[list[str]] = None,
 ) -> list[dict]:
-    """Dense retrieval: cosine similarity against the chunk embeddings."""
+    """Run dense cosine retrieval and retain both raw and metadata-boosted scores.
+
+    中文：``score_v`` 决定候选排序，``cos_sim`` 保持未加权，供拒答门控进行跨查询比较。
+    """
     boost_expr, boost_vals, _ = build_boost_expression(
         boost_ticker, boost_filing_type, boost_years or [], start_idx=3 + len(filter_params)
     )
@@ -183,6 +204,8 @@ async def table_child_vector_search(
 
     The experimental table is intentionally optional. A production database
     without it keeps serving the standard dense and sparse arms.
+
+    中文：表格子行用于提高数值问题的召回；实验表缺失时安全返回空候选，不中断主检索。
     """
     limit = 30
     boost_expr, boost_vals, _ = build_boost_expression(
@@ -257,7 +280,10 @@ async def bm25_search(
     boost_filing_type: Optional[str] = None,
     boost_years: Optional[list[str]] = None,
 ) -> list[dict]:
-    """Sparse retrieval: Postgres full-text ``ts_rank`` over the chunk tsvector."""
+    """Run sparse Postgres full-text retrieval with the same metadata boosts.
+
+    中文：``score_b`` 用于候选融合；原始 ``bm25_raw`` 仅用于可观察性，不能用作绝对置信度。
+    """
     boost_expr, boost_vals, _ = build_boost_expression(
         boost_ticker, boost_filing_type, boost_years or [], start_idx=3 + len(filter_params)
     )

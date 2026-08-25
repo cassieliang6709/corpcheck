@@ -18,6 +18,8 @@ Two deliberate properties:
 * **Filtering happens before ranking.** Dropping candidates after top-k selection
   would silently return fewer than ``k`` results; dropping them from the
   candidate pool lets valid chunks move up and fill those slots.
+
+中文：修订文件只替换被修订的原始章节；过滤在候选集阶段完成，防止过期数据进入最终答案。
 """
 
 from __future__ import annotations
@@ -62,6 +64,8 @@ class FilingKey(NamedTuple):
     revises; such an amendment is treated as covering the whole fiscal year.
     ``section`` is ``None`` only when no amendment section metadata is
     available, and conservatively covers the whole filing period.
+
+    中文：键以公司、基础文件类型、财年、期间和章节表示修订范围；缺失范围信息按安全的通配符处理。
     """
 
     ticker: str
@@ -72,12 +76,18 @@ class FilingKey(NamedTuple):
 
 
 def is_amendment(filing_type: Optional[str]) -> bool:
-    """True for amended filing types such as ``10-K/A`` or ``10-Q/A``."""
+    """Return whether a filing type is an amendment such as ``10-K/A``.
+
+    中文：只检查标准修订后缀；输入为空时安全地视为非修订文件。
+    """
     return bool(filing_type) and filing_type.strip().upper().endswith(AMENDMENT_SUFFIX)
 
 
 def base_filing_type(filing_type: Optional[str]) -> Optional[str]:
-    """Strip the amendment suffix: ``10-K/A`` → ``10-K``. Non-amendments pass through."""
+    """Remove the amendment suffix; non-amendments pass through unchanged.
+
+    中文：修订与原件通过同一基础文件类型相匹配，例如 ``10-K/A`` 对应 ``10-K``。
+    """
     if not filing_type:
         return None
     stripped = filing_type.strip()
@@ -87,6 +97,10 @@ def base_filing_type(filing_type: Optional[str]) -> Optional[str]:
 
 
 def _normalize_period(period: Optional[str]) -> Optional[str]:
+    """Normalize optional period metadata for equality comparison.
+
+    中文：空白与大小写不应产生不同期间键；缺失值仍保持 None 以表达通配范围。
+    """
     if period is None:
         return None
     cleaned = period.strip().upper()
@@ -96,6 +110,10 @@ def _normalize_period(period: Optional[str]) -> Optional[str]:
 def _normalize_section(
     section: Optional[str], filing_type: Optional[str] = None
 ) -> Optional[str]:
+    """Normalize section metadata while preserving only safe identities.
+
+    中文：10-K Item 编号可映射到标准章节；10-Q 的裸 Item 编号不唯一，故保守返回通配符。
+    """
     if section is None:
         return None
     cleaned = " ".join(section.split()).upper()
@@ -122,6 +140,8 @@ def filing_key_for_row(row: dict[str, Any]) -> Optional[FilingKey]:
     Returns ``None`` for anything that cannot be superseded by an SEC amendment —
     news and transcript chunks, or filings missing the metadata to identify a
     period.
+
+    中文：只有带齐必要 SEC 元数据的片段才可能被修订覆盖；其他来源不参与此过滤。
     """
     if (row.get("source_type") or "sec") != "sec":
         return None
@@ -154,6 +174,8 @@ def is_superseded(key: FilingKey, superseded: frozenset[FilingKey]) -> bool:
     over the whole filing period. If the candidate itself has no section, any
     matching amendment suppresses it because the system cannot prove that the
     requested text is outside the amendment's scope.
+
+    中文：范围不完整时偏向抑制原件，防止把已更正内容当作权威证据返回。
     """
     for amended in superseded:
         if (
@@ -180,6 +202,8 @@ async def load_superseded_filings(
     rather than cached at startup: an offline backfill can land a new amendment
     at any time, and a stale cache here means serving superseded data — exactly
     the failure this module exists to prevent.
+
+    中文：查询仅覆盖当前候选的公司与财年，并按请求实时读取；避免离线回填后仍使用过期缓存。
     """
     keys = [k for k in (filing_key_for_row(r) for r in rows) if k is not None]
     if not keys:
@@ -240,6 +264,8 @@ def filter_superseded_rows(
     Chunks from the amendment itself are always kept. Original chunks are
     dropped only when their section matches an amended section, unless missing
     amendment metadata forced a whole-period wildcard.
+
+    中文：返回保留和丢弃两组，便于上层补齐结果并记录审计日志。
     """
     if not superseded:
         return rows, []
@@ -262,7 +288,10 @@ def filter_superseded_rows(
 
 
 def log_dropped(dropped: list[dict[str, Any]]) -> None:
-    """Record what was suppressed — provenance decisions must be auditable."""
+    """Log suppressed candidates so revision decisions remain auditable.
+
+    中文：只记录实际被丢弃的片段，并汇总文件期间，避免常规请求产生噪声日志。
+    """
     if not dropped:
         return
     periods = sorted(

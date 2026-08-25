@@ -1,5 +1,8 @@
 """Calibrate the abstain thresholds against the live corpus.
 
+中文：从当前语料的可回答与不可回答问题分布校准拒答阈值。阈值依赖具体嵌入模型
+和语料版本，因此结果用于人工配置决策，而不会由脚本自动写回生产设置。
+
 Measures the raw (unboosted) dense cosine distribution for questions the corpus
 can genuinely answer versus questions it cannot, so ABSTAIN_TOP1_MIN and
 ABSTAIN_MEAN_TOP3_MIN are set from data rather than guessed.
@@ -63,6 +66,10 @@ SQL = """
 
 
 async def probe(conn, q):
+    """Measure top retrieval similarities for one calibration query.
+
+    中文：返回原始余弦统计供人工设定阈值；连接或嵌入失败应由调用方可见。
+    """
     vec = embed_query(q)
     rows = await conn.fetch(SQL, str(vec))
     cos = [r["cos"] for r in rows]
@@ -70,6 +77,10 @@ async def probe(conn, q):
 
 
 async def main():
+    """Print live-corpus calibration observations without changing settings.
+
+    中文：该脚本只报告分布，绝不自动写回拒答阈值；数据库不可用时应直接失败。
+    """
     conn = await asyncpg.connect(
         host=s.DB_HOST, port=s.DB_PORT, database=s.DB_NAME,
         user=s.DB_USER, password=s.DB_PASSWORD, timeout=10,

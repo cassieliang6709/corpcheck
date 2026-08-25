@@ -1,4 +1,7 @@
-"""Typed data structures for the claim verification overlay."""
+"""Typed data structures for the claim verification overlay.
+
+中文：这些 Pydantic 模型同时是 API 契约，字段描述和类文档会进入 JSON Schema，修改前需评估兼容性。
+"""
 
 from __future__ import annotations
 

@@ -1,5 +1,8 @@
 """Deterministic IR metrics with token-overlap weak supervision.
 
+中文：这里的函数是纯确定性的“量尺”，用于比较检索配置而非声称事实正确性；
+统一的弱监督偏差可使 A/B 差异仍然具有解释性。
+
 Everything here is pure: no database, no network, no model. That is deliberate —
 these functions are the measuring instrument, so they must be unit-testable and
 reproducible on their own.

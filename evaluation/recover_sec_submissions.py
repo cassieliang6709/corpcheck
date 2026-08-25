@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Recover exact raw SEC submissions from a signed corpus snapshot.
+"""Recover exact raw SEC submissions from a checksummed corpus snapshot.
+
+中文：依据带校验和的快照恢复精确 SEC 原始提交到隔离目录，并用哈希和头信息
+验证下载。校验和检测损坏，但不是带密钥签名；该工具不连接数据库。
 
 This utility only writes an isolated SEC download tree and a deterministic
 recovery report. It never connects to or mutates a database.
@@ -80,6 +83,12 @@ class _CurlTransferError(RuntimeError):
 
 @dataclass(frozen=True)
 class FilingSpec:
+    """One manifest-authorized filing identity used to constrain SEC recovery.
+
+    中文：快照中允许恢复的一份 filing 的完整身份；恢复步骤只能接受这些固定字段，
+    从而防止 URL、公司或申报期在下载时漂移。
+    """
+
     ticker: str
     form: str
     fiscal_year: int
@@ -94,6 +103,12 @@ class FilingSpec:
 
 @dataclass(frozen=True)
 class FileRecord:
+    """Verified local recovery artifact recorded by relative path and digest.
+
+    中文：恢复目录内已验证文件的最小审计记录；哈希或大小不一致意味着产物不能进入
+    后续重处理。
+    """
+
     relative_path: str
     sha256: str
     size: int
@@ -621,6 +636,11 @@ def recover_manifest(
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse recovery limits and paths without opening the manifest or network.
+
+    中文：参数阶段只定义受限恢复操作；快照校验和、SEC 响应与目录安全性在
+    执行前后分别验证。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--download-dir", required=True, type=Path)
@@ -634,6 +654,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Recover manifest-authorized files and translate contract errors to CLI status.
+
+    中文：入口仅写隔离恢复目录；验证失败时不会将未验证下载伪装为可重处理输入。
+    """
     args = parse_args(argv)
 
     def show_progress(completed: int, total: int, resumed: int) -> None:

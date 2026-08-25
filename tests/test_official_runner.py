@@ -25,12 +25,16 @@ def _build_manifest() -> OfficialManifest:
     )
 
 
-def test_write_run_result_writes_timestamped_payload_and_pointer(tmp_path: Path):
+def test_write_run_result_writes_only_to_custom_output_root(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    output_root = tmp_path / "official-results"
     payload = _build_manifest()
     args = Namespace(
         manifest=Path("evaluation/official/benchmark_manifest.yaml"),
         seed=42,
-        output_root=tmp_path,
+        output_root=output_root,
         label="manual-check",
         log_level="INFO",
         task=None,
@@ -57,12 +61,13 @@ def test_write_run_result_writes_timestamped_payload_and_pointer(tmp_path: Path)
 
     write_run_result(payload, args, [result])
 
-    stamped = tmp_path / "results_manual-check.json"
-    latest = tmp_path / "results.json"
+    stamped = output_root / "results_manual-check.json"
+    latest = output_root / "results.json"
     assert stamped.exists()
     assert latest.exists()
+    assert not (tmp_path / "evals").exists()
 
-    stamped_payload = (tmp_path / "results_manual-check.json").read_text(encoding="utf-8")
+    stamped_payload = stamped.read_text(encoding="utf-8")
     latest_payload = latest.read_text(encoding="utf-8")
     assert stamped_payload == latest_payload
 

@@ -42,6 +42,10 @@ Both thresholds are env-tunable, and the calibration script lives at
 ``evaluation/calibrate_abstain.py`` — rerun it whenever the embedding model or
 the corpus changes, because these numbers are properties of that pairing rather
 than universal constants.
+
+中文：拒答门控在调用 LLM 前执行。存在 dense 分数时使用未加权语义相似度；
+sparse-only 候选目前因不可测而放行。公司和财年覆盖由另一组元数据门控检查。
+阈值必须随语料库或嵌入模型变化重新校准。
 """
 
 from __future__ import annotations
@@ -68,6 +72,8 @@ class AbstainDecision:
 
     Truthy when the system should refuse. ``reason`` is safe to show a user;
     ``detail`` carries the measured values for logs and evaluation.
+
+    中文：对象在布尔上下文中表示“应拒答”；面向用户的原因与供日志/评估使用的测量细节分开保存。
     """
 
     __slots__ = ("abstain", "reason", "top1", "mean_top3", "status")
@@ -112,6 +118,8 @@ def _dense_similarities(results: Sequence[ChunkResult]) -> list[float]:
     final list, so the top-ranked row is not necessarily the most semantically
     similar one. The question this gate asks is "is anything relevant here?",
     which is about the pool rather than the ordering.
+
+    中文：只统计有原始 dense 分数的候选并重新排序；稀疏检索结果缺少可比测量，不能当成零分。
     """
     sims = [r.cos_sim for r in results if r.cos_sim is not None]
     return sorted(sims, reverse=True)
@@ -128,6 +136,9 @@ def evaluate_confidence(
     a pool with no strong anchor at all, while ``mean_top3_min`` rejects a pool
     where one lucky hit is surrounded by noise — enough to look confident, not
     enough to support an answer.
+
+    中文：存在 dense 分数时，双阈值分别防止“完全没有相关证据”和“只有一个
+    偶然命中”，均通过才允许回答；sparse-only 候选当前不应用这两个阈值。
     """
     if not results:
         return AbstainDecision(
@@ -174,7 +185,10 @@ def evaluate_answerability(
     results: Sequence[ChunkResult],
     expected_company: Optional[str] = None,
 ) -> AbstainDecision:
-    """Apply explicit metadata coverage checks, then the cosine confidence gate."""
+    """Apply metadata coverage checks before the cosine-confidence gate.
+
+    中文：先确认请求的公司和财年在证据中出现，再判断语义相似度，避免高分但主体错误的回答。
+    """
     if not results:
         return evaluate_confidence(results)
 
@@ -242,6 +256,9 @@ def should_abstain(
     top1_min: float = ABSTAIN_TOP1_MIN,
     mean_top3_min: float = ABSTAIN_MEAN_TOP3_MIN,
 ) -> tuple[bool, str]:
-    """Tuple-returning wrapper around :func:`evaluate_confidence`."""
+    """Return the confidence decision in the legacy ``(abstain, reason)`` shape.
+
+    中文：保留元组接口以兼容旧调用方；新逻辑应优先使用包含测量详情的 ``AbstainDecision``。
+    """
     decision = evaluate_confidence(results, top1_min, mean_top3_min)
     return decision.abstain, decision.reason

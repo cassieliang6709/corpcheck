@@ -6,6 +6,9 @@ all-MiniLM-L6-v2 model from sentence-transformers.
 
 Embeddings are L2-normalised so cosine similarity equals dot product,
 which is required for pgvector's ``<=>`` operator.
+
+中文：该模块只产生与项目模型匹配的向量；标准化保证 pgvector 的余弦距离查询与离线评估
+使用相同几何含义。
 """
 
 from __future__ import annotations
@@ -41,6 +44,8 @@ class Embedder:
     device:
         Torch device string ('cpu', 'cuda', 'mps', etc.).
         ``None`` lets sentence-transformers auto-detect.
+
+    中文：包装模型加载、批编码和类型统一。模型下载或设备选择由 sentence-transformers 负责。
     """
 
     def __init__(
@@ -82,6 +87,8 @@ class Embedder:
         np.ndarray
             Float32 array of shape (len(texts), EMBEDDING_DIM).
             Rows are L2-normalised if ``self.normalize`` is True.
+
+        中文：空字符串会以空格送入模型以避免底层错误；输入顺序与输出行严格对应。
         """
         if not texts:
             return np.zeros((0, EMBEDDING_DIM), dtype=np.float32)
@@ -131,6 +138,8 @@ class Embedder:
         -------
         np.ndarray
             Float32 array of shape (len(texts), EMBEDDING_DIM).
+
+        中文：按实例 batch size 手动拼接，适用于超出单次模型调用内存预算的语料。
         """
         total = len(texts)
         if total == 0:
@@ -159,6 +168,8 @@ class Embedder:
         """
         Embed a single string and return a 1D float32 array of length
         EMBEDDING_DIM.
+
+        中文：是 ``encode`` 的单文本包装，不改变标准化配置。
         """
         return self.encode([text])[0]
 
@@ -172,6 +183,8 @@ class Embedder:
         Compute cosine similarity between two 1D embedding vectors.
         If embeddings are already L2-normalised this is equivalent to
         the dot product.
+
+        中文：零向量返回 0.0，避免除零错误；该函数适合小规模诊断，不替代数据库检索。
         """
         a = a.astype(np.float32)
         b = b.astype(np.float32)
@@ -206,6 +219,8 @@ class Embedder:
         -------
         list[tuple[int, float]]
             Sorted (descending score) list of (index, score) pairs.
+
+        中文：假定输入已标准化，因此使用矩阵点积快速排序；调用方负责保证向量维度兼容。
         """
         q = query_embedding.astype(np.float32)
         C = corpus_embeddings.astype(np.float32)
@@ -219,7 +234,10 @@ class Embedder:
 
     @property
     def dim(self) -> int:
-        """Embedding dimensionality."""
+        """Embedding dimensionality.
+
+        中文：返回项目 schema 约定的维度，而不是探测模型运行时输出。
+        """
         return EMBEDDING_DIM
 
 
@@ -232,7 +250,10 @@ _global_embedder: Embedder | None = None
 
 
 def get_embedder(model_name: str = EMBEDDING_MODEL) -> Embedder:
-    """Return a module-level cached :class:`Embedder` instance."""
+    """Return a module-level cached :class:`Embedder` instance.
+
+    中文：不同模型名会替换缓存实例；适合脚本进程内复用，不提供跨进程缓存。
+    """
     global _global_embedder
     if _global_embedder is None or _global_embedder.model_name != model_name:
         _global_embedder = Embedder(model_name=model_name)
@@ -260,6 +281,8 @@ def embed_texts(
     -------
     np.ndarray
         Float32 array of shape (len(texts), 384).
+
+    中文：函数会更新全局实例的 batch 和标准化设置；并发调用方应改用各自的 ``Embedder`` 实例。
     """
     embedder = get_embedder()
     embedder.batch_size = batch_size

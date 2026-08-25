@@ -16,6 +16,9 @@ pgvector
 Embedding vectors (numpy float32 arrays) are serialised using the
 ``pgvector.psycopg2`` adapter so they are stored as native ``vector`` columns
 understood by the IVFFlat index.
+
+中文：加载层只接收已经下载和处理好的字典记录。它通过自然键 UPSERT 实现可重跑性，并在批次
+边界提交以减少长任务失败后的重做范围。
 """
 
 from __future__ import annotations
@@ -84,7 +87,10 @@ _CHUNK_UPSERT_SQL = """
 # ---------------------------------------------------------------------------
 
 def _connect(dsn: str) -> psycopg2.extensions.connection:
-    """Open a psycopg2 connection and register the pgvector type adapter."""
+    """Open a psycopg2 connection and register the pgvector type adapter.
+
+    中文：关闭 autocommit，让调用方法可以明确控制成功提交与失败回滚。
+    """
     conn = psycopg2.connect(dsn)
     conn.autocommit = False
     register_vector(conn)
@@ -105,6 +111,9 @@ class DBLoader:
         PostgreSQL connection string (defaults to ``DATABASE_URL`` from config).
     batch_size:
         Number of rows per executemany call.
+
+    中文：单个实例持有一个惰性连接。公开加载方法接受序列化记录并负责类型归一与批次事务，
+    但不下载、清洗或生成向量。
     """
 
     def __init__(
@@ -122,14 +131,20 @@ class DBLoader:
 
     @property
     def conn(self) -> psycopg2.extensions.connection:
-        """Return the active connection, re-opening if necessary."""
+        """Return the active connection, re-opening if necessary.
+
+        中文：连接按需建立；已关闭的连接会在下一次访问时重新打开。
+        """
         if self._conn is None or self._conn.closed:
             logger.info("Opening database connection")
             self._conn = _connect(self.dsn)
         return self._conn
 
     def close(self) -> None:
-        """Close the database connection."""
+        """Close the database connection.
+
+        中文：关闭是幂等的，可安全由 context manager 或调用方重复触发。
+        """
         if self._conn and not self._conn.closed:
             self._conn.close()
             logger.info("Database connection closed")
@@ -148,6 +163,8 @@ class DBLoader:
         """
         Execute the SQL schema file to create tables, indexes, and
         triggers if they don't already exist.
+
+        中文：schema 执行属于一个事务；出错时回滚而不会留下半初始化的当前事务。
         """
         try:
             with open(schema_path) as f:
@@ -174,6 +191,8 @@ class DBLoader:
         """
         Execute *sql* for each row in *rows* in batches of ``self.batch_size``.
         Returns the total number of rows processed.
+
+        中文：每个批次独立提交，适合长时间导入；发生异常时只回滚当前未提交工作。
         """
         if not rows:
             return 0
@@ -205,6 +224,8 @@ class DBLoader:
         Upsert rows into ``companies``.
 
         Expected keys: ticker, name, sector, industry, market_cap, description.
+
+        中文：未知公司名或行业不会覆盖数据库中已有的可信值，防止上游缺失值降低数据质量。
         """
         sql = """
             INSERT INTO companies (ticker, name, sector, industry, market_cap, description, updated_at)
@@ -240,6 +261,8 @@ class DBLoader:
         so a mislabelled fiscal year replaces an unrelated accession instead of
         adding a row. Left unreported that loses a filing silently, which is how
         JNJ's FY2022 10-K disappeared behind FY2023.
+
+        中文：业务键没有 accession，财年推断错误可能覆盖另一份报告，因此在写入前显式告警。
         """
         batch: dict[tuple, str] = {}
         for row in rows:
@@ -289,6 +312,8 @@ class DBLoader:
         Expected keys: ticker, filing_type, fiscal_year, period,
                        filed_date, period_of_report, accession_number,
                        cik, source_url, local_path.
+
+        中文：写入后重新查询 ID，供 chunks 用稳定外键关联；空的可选 SEC 字段会标准化为默认值。
         """
         sql = """
             INSERT INTO filings (
@@ -356,6 +381,9 @@ class DBLoader:
                        (numpy array or list), source_url.
 
         The ``content_tsv`` column is populated automatically by a DB trigger.
+
+        中文：向量会统一为 float32，JSON 结构信息会包装为 PostgreSQL JSON；
+        全文索引由数据库触发器维护。
         """
         # Ensure embeddings are numpy arrays
         normalised_rows = []
@@ -386,7 +414,10 @@ class DBLoader:
         return n
 
     def replace_filing_chunks_atomic(self, filing_id: int, rows: Sequence[Row]) -> int:
-        """Replace one filing's complete chunk set in a single transaction."""
+        """Replace one filing's complete chunk set in a single transaction.
+
+        中文：只适合完整重建结果。先 upsert 新 chunk，再删除未保留的旧 index，避免查询看到空窗口。
+        """
         normalised_rows = self._validate_replacement_chunks(filing_id, rows)
         keep_chunk_indexes = [row["chunk_index"] for row in normalised_rows]
 
@@ -429,6 +460,10 @@ class DBLoader:
 
     @staticmethod
     def _validate_replacement_chunks(filing_id: int, rows: Sequence[Row]) -> list[Row]:
+        """Validate the complete-chunk-set invariants required for atomic replacement.
+
+        中文：要求同一 filing、连续且唯一的 index 以及固定维度的向量，防止删除阶段损坏数据集。
+        """
         if (
             isinstance(filing_id, bool)
             or not isinstance(filing_id, int)
@@ -493,6 +528,8 @@ class DBLoader:
         """
         Remove stale chunk rows for a filing after a re-run produced a smaller
         or reshaped chunk set.
+
+        中文：调用方先写入新的保留 index；本方法只删除列表外记录，不能单独保证原子替换。
         """
         with self.conn.cursor() as cur:
             cur.execute(
@@ -520,6 +557,8 @@ class DBLoader:
         Expected keys: ticker, date, open, high, low, close, adj_close,
                        volume, market_cap, pe_ratio, pb_ratio, ps_ratio,
                        dividend_yield, beta.
+
+        中文：自然键是 ticker 与日期，重跑会覆盖同一天的外部市场快照。
         """
         sql = """
             INSERT INTO market_data (
@@ -563,6 +602,8 @@ class DBLoader:
                        total_liabilities, total_debt, shareholders_equity,
                        cash_and_equivalents, operating_cash_flow, capex,
                        free_cash_flow.
+
+        中文：自然键为公司、财年和期间；缺失财报字段由下载器传入 ``None``，不会在此猜测。
         """
         sql = """
             INSERT INTO financials (
@@ -612,6 +653,8 @@ class DBLoader:
         Upsert FRED macro data into ``macro_indicators``.
 
         Expected keys: date, indicator_id, series_name, value.
+
+        中文：每个指标日期是业务键，重跑时更新已对齐到日粒度的数值。
         """
         sql = """
             INSERT INTO macro_indicators (date, indicator_id, series_name, value)
@@ -637,6 +680,8 @@ class DBLoader:
                        embedding (numpy array or None).
 
         The ``content_tsv`` column is populated automatically by a DB trigger.
+
+        中文：来源 URL 是新闻的去重键；embedding 允许为 ``None``，以支持分离的向量回填。
         """
         sql = """
             INSERT INTO news_articles (
@@ -681,6 +726,8 @@ class DBLoader:
                        content_kind, chunk_strategy, display_title,
                        chunk_group_key, structure_meta, source_url,
                        embedding (numpy array or None).
+
+        中文：文章 ID 与 chunk index 共同定义幂等写入；结构字段的默认值保持与其他文本 chunk 一致。
         """
         sql = """
             INSERT INTO news_chunks (
@@ -743,6 +790,10 @@ class DBLoader:
         return n
 
     def prune_news_chunks_for_article(self, news_article_id: int) -> int:
+        """Delete every existing chunk for one article before a full rebuild.
+
+        中文：新闻回填以整篇文章为单位替换；调用方应先确认新 chunk 已成功生成。
+        """
         with self.conn.cursor() as cur:
             cur.execute(
                 """
@@ -766,6 +817,8 @@ class DBLoader:
 
         Expected keys: ticker, fiscal_year, quarter, content,
                        published_date, source_url.
+
+        中文：返回的 ID 映射让 transcript chunks 使用数据库真实外键而非临时内存编号。
         """
         sql = """
             INSERT INTO earnings_transcripts (
@@ -817,6 +870,8 @@ class DBLoader:
                        data_signal_score, is_quantitative, content_kind,
                        chunk_strategy, display_title, chunk_group_key,
                        structure_meta, embedding (numpy array or None).
+
+        中文：按 transcript 和 chunk index 幂等更新，保留问答、发言人等来自处理阶段的结构信息。
         """
         sql = """
             INSERT INTO transcript_chunks (
@@ -878,6 +933,10 @@ class DBLoader:
         return n
 
     def prune_transcript_chunks(self, transcript_id: int) -> int:
+        """Delete every existing chunk for one transcript before a full rebuild.
+
+        中文：与新闻 chunk 回填相同，这是非原子清理步骤，调用方需安排正确的重建顺序。
+        """
         with self.conn.cursor() as cur:
             cur.execute(
                 """
@@ -897,6 +956,8 @@ class DBLoader:
     def get_stats(self) -> dict[str, int]:
         """
         Return row counts for all pipeline tables.
+
+        中文：单表查询失败记为 ``-1``，使运行报告仍能显示其余表的状态。
         """
         tables = [
             "companies",
@@ -923,7 +984,10 @@ class DBLoader:
         return stats
 
     def get_db_size(self) -> str:
-        """Return the database size as a human-readable string."""
+        """Return the database size as a human-readable string.
+
+        中文：依赖 PostgreSQL 的当前数据库函数，仅用于运行后诊断。
+        """
         with self.conn.cursor() as cur:
             cur.execute("SELECT pg_size_pretty(pg_database_size(current_database()))")
             row = cur.fetchone()
@@ -935,5 +999,8 @@ class DBLoader:
 # ---------------------------------------------------------------------------
 
 def get_loader(dsn: str = DATABASE_URL) -> DBLoader:
-    """Return a new :class:`DBLoader` connected to *dsn*."""
+    """Return a new :class:`DBLoader` connected to *dsn*.
+
+    中文：该工厂不立即建立连接；首次数据库操作时才会连接。
+    """
     return DBLoader(dsn=dsn)

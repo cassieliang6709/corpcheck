@@ -1,5 +1,8 @@
 """Adapter from FinanceBench rows to CorpCheck's provenance vocabulary.
 
+中文：本模块只做基准数据与 CorpCheck 溯源字段之间的显式映射。映射不完整时
+保持失败可见，避免把不确定的文档身份误当作命中。
+
 FinanceBench identifies a source document as ``AMAZON_2019_10K`` plus the
 structured fields ``company`` / ``doc_type`` / ``doc_period``. CorpCheck
 identifies a filing as ticker + filing_type + fiscal_year (+ quarter). This

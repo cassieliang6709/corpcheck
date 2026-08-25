@@ -34,6 +34,10 @@ Usage
     --db-url URL                override DATABASE_URL env var
     --log-level LEVEL           DEBUG / INFO / WARNING (default: INFO)
     --log-file PATH             path to log file
+
+中文：总管道按来源下载、处理并加载数据。各 ``--skip-*`` 选项只跳过整阶段，并不
+自动从本地文件断点续跑；恢复本地 SEC 文件应使用 ``backfill_local_sec_filings``。
+``--skip-load`` 不写业务数据，但当前仍会创建 ``DBLoader``，因此仍需数据库连接。
 """
 
 from __future__ import annotations
@@ -43,8 +47,6 @@ import logging
 import os
 import sys
 import time
-from pathlib import Path
-from typing import Any
 
 from tqdm import tqdm
 
@@ -53,6 +55,10 @@ from tqdm import tqdm
 # ---------------------------------------------------------------------------
 
 def _setup_logging(level: str, log_file: str) -> None:
+    """Configure the process-wide console and optional file log handlers.
+
+    中文：必须在导入重型阶段模块前调用，以保证所有下载器和处理器共享同一日志格式。
+    """
     fmt = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
     if log_file:
@@ -71,7 +77,6 @@ from corpcheck.ingestion.config import (
     ALL_TICKERS,
     DATABASE_URL,
     DEFAULT_FILING_TYPES,
-    EMBEDDING_BATCH_SIZE,
     LOG_FILE,
     LOG_LEVEL,
     YEARS,
@@ -99,7 +104,10 @@ def _run_sec_stage(
     filing_types: list[str],
     years: list[int],
 ) -> list[tuple]:
-    """Download SEC filings and return filing metadata tuples."""
+    """Download SEC filings and return filing metadata tuples.
+
+    中文：这一阶段只把原始 filing 落盘并收集元数据；正文清洗和数据库写入在后续阶段完成。
+    """
     logger.info("=== Stage: SEC filing download ===")
     dl = SECDownloader()
     metas = dl.download(tickers, filing_types, years)
@@ -110,7 +118,10 @@ def _run_sec_stage(
 def _run_market_stage(
     tickers: list[str],
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """Download market data and return (company_infos, price_rows, fin_rows)."""
+    """Download market data and return (company_infos, price_rows, fin_rows).
+
+    中文：三类记录保持分开，加载层需要把它们写入不同的自然键表。
+    """
     logger.info("=== Stage: Market data download ===")
     dl = MarketDownloader()
     result = dl.download_all(tickers)
@@ -124,7 +135,10 @@ def _run_market_stage(
 
 
 def _run_macro_stage() -> list[dict]:
-    """Download FRED macro data."""
+    """Download FRED macro data.
+
+    中文：下载器已将不同频率指标对齐为日粒度，本阶段不额外变换值。
+    """
     logger.info("=== Stage: Macro data download ===")
     dl = MacroDownloader()
     rows = dl.download_all()
@@ -137,7 +151,10 @@ def _run_news_stage(
     years: list[int],
     official_only: bool = False,
 ) -> list[dict]:
-    """Download news articles."""
+    """Download news articles.
+
+    中文：官方来源模式的选择在下载器内执行，管道只传递范围和记录结果。
+    """
     logger.info("=== Stage: News download ===")
     dl = NewsDownloader(tickers=tickers, years=years, official_only=official_only)
     rows = dl.download_all()
@@ -149,7 +166,10 @@ def _run_transcript_stage(
     tickers: list[str],
     years: list[int],
 ) -> list[dict]:
-    """Download earnings call transcripts."""
+    """Download earnings call transcripts.
+
+    中文：返回的记录含预先识别的章节；分块阶段会再保留发言人与问答结构。
+    """
     logger.info("=== Stage: Transcript download ===")
     dl = TranscriptDownloader(tickers=tickers, years=years)
     rows = dl.download_all()
@@ -168,6 +188,9 @@ def _process_filings(
     """
     Clean, chunk, embed, and load SEC filings.
     Returns the total number of chunks loaded.
+
+    中文：每份 filing 独立失败、独立记录，避免单一损坏文档终止整批；清洗结果的 chunk index
+    是该 filing 内的稳定顺序。
     """
     logger.info("=== Stage: Clean / chunk / embed SEC filings ===")
     cleaner_cache: dict[str, HTMLCleaner] = {}
@@ -316,7 +339,10 @@ def _process_news(
     skip_embed: bool,
     skip_load: bool,
 ) -> int:
-    """Embed and load news articles."""
+    """Embed and load news articles.
+
+    中文：该主阶段写入文章父记录；文本级 ``news_chunks`` 由专用 backfill 命令重建。
+    """
     logger.info("=== Stage: Embed / load news ===")
     if not news_rows:
         return 0
@@ -346,7 +372,10 @@ def _process_transcripts(
     skip_embed: bool,
     skip_load: bool,
 ) -> int:
-    """Chunk, embed, and load transcripts and their chunks."""
+    """Chunk, embed, and load transcripts and their chunks.
+
+    中文：先写父 transcript 获取真实 ID，再替换该 transcript 的全部 chunk，保持外键一致。
+    """
     logger.info("=== Stage: Process transcripts ===")
     if not transcript_rows:
         return 0
@@ -444,7 +473,10 @@ def _process_transcripts(
 
 
 def _print_stats(loader: DBLoader, elapsed: float) -> None:
-    """Print final pipeline statistics."""
+    """Print final pipeline statistics.
+
+    中文：统计失败只影响最终报告，不会反向标记已经提交的数据阶段失败。
+    """
     try:
         stats = loader.get_stats()
         db_size = loader.get_db_size()
@@ -470,6 +502,10 @@ def _print_stats(loader: DBLoader, elapsed: float) -> None:
 # ---------------------------------------------------------------------------
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Build the stable command-line interface for full and incremental runs.
+
+    中文：参数文案是自动化脚本的公开接口；这里仅集中声明，不在解析阶段执行任何 I/O。
+    """
     p = argparse.ArgumentParser(
         description="Financial Research RAG Data Pipeline",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -527,6 +563,10 @@ def _build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> None:
+    """Run the selected ingestion stages in dependency-safe order.
+
+    中文：市场数据先创建公司行以满足外键，再按独立来源处理；``--skip-load`` 保留处理计算但不写库。
+    """
     parser = _build_parser()
     args = parser.parse_args(argv)
 

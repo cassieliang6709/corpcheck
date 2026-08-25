@@ -1,5 +1,8 @@
 """Collect CorpCheck answer-evaluation predictions sequentially as JSONL.
 
+中文：按固定输入顺序收集预测并写成可审计 JSONL，顺序执行能让失败记录及其
+上下文清晰可复现；检索基线不会伪造 LLM 答案。
+
 Retrieval-only mode records the confidence gate without contacting an LLM. Its
 ``answer`` is therefore empty when the gate passes; this is intentional so the
 output remains honest and can be inspected or scored as a retrieval baseline.
@@ -132,6 +135,10 @@ def write_jsonl(records: Sequence[dict[str, Any]], path: Path) -> None:
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse sequential prediction-collection settings without contacting services.
+
+    中文：这里不初始化数据库或 LLM；连接、输入和输出问题由执行阶段明确报告。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=Path, default=DEFAULT_SEED)
     parser.add_argument("--output", type=Path, required=True)
@@ -164,6 +171,10 @@ async def _run(args: argparse.Namespace, records: list[dict[str, Any]]) -> None:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Run asynchronous collection behind a synchronous CLI exit-code boundary.
+
+    中文：入口保留 JSONL 收集器的失败信息，避免在评测数据不完整时静默写出结果。
+    """
     args = parse_args(argv)
     try:
         records = read_seed(args.seed)

@@ -13,6 +13,9 @@ Chunk strategy
 3. For each window, decode to text and then *trim to the nearest sentence
    boundary* so chunks don't end mid-sentence.
 4. Return (section_name, chunk_text, token_count) tuples.
+
+中文：分块以 embedding 模型的 token 为准。叙述按句子打包，表格按行打包，二者的重叠规则不同，
+以尽量保留可读性和表格关系。
 """
 
 from __future__ import annotations
@@ -60,7 +63,10 @@ _tokenizer: PreTrainedTokenizerBase | None = None
 
 
 def get_tokenizer(model_name: str = EMBEDDING_MODEL) -> PreTrainedTokenizerBase:
-    """Return a cached tokenizer for *model_name*."""
+    """Return a cached tokenizer for *model_name*.
+
+    中文：进程内只加载一次，以保证 token 计数与 embedding 模型一致并避免重复启动开销。
+    """
     global _tokenizer
     if _tokenizer is None:
         logger.info("Loading tokenizer: %s", model_name)
@@ -130,6 +136,9 @@ class Chunker:
         Number of tokens of overlap between consecutive chunks.
     model_name:
         HuggingFace model name used to load the tokenizer.
+
+    中文：根据来源和内容类型选择分块预算。它不丢失结构元数据，返回的 payload 可直接交给
+    向量化和数据库加载阶段。
     """
 
     def __init__(
@@ -151,6 +160,10 @@ class Chunker:
         chunk_size: int | None = None,
         overlap: int | None = None,
     ) -> dict[str, int]:
+        """Resolve source-specific sizes while allowing legacy caller overrides.
+
+        中文：未配置的来源继续使用实例默认值，保持旧的 ``chunk_section`` 调用语义。
+        """
         defaults = _CHUNK_CONFIGS.get(
             (source_type, content_kind),
             {
@@ -183,6 +196,10 @@ class Chunker:
         fallback_chunk_size: int,
         fallback_overlap: int,
     ) -> list[ChunkTuple]:
+        """Pack complete sentences into overlapping chunks, with token windows as fallback.
+
+        中文：超长单句或无法可靠切句时退回 token 窗口，保证任何可用文本仍可进入检索流程。
+        """
         text = text.strip()
         if len(text) < MIN_CHUNK_CHARS:
             return []
@@ -278,6 +295,10 @@ class Chunker:
         chunk_size: int,
         overlap: int,
     ) -> list[ChunkTuple]:
+        """Split text by token windows and trim only boundary fragments when possible.
+
+        中文：这是叙述分块的兜底路径；重叠保护跨窗口上下文，最小长度过滤避免噪声向量。
+        """
         token_ids: list[int] = self.tokenizer.encode(
             text,
             add_special_tokens=False,
@@ -330,6 +351,8 @@ class Chunker:
     ) -> list[ChunkTuple]:
         """
         Chunk a structured table block by rows rather than sentence boundaries.
+
+        中文：表格的单元格语义依赖行和表头，因此只在行边界切分，并复制有限的相邻行作为上下文。
         """
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         if not lines:
@@ -418,6 +441,8 @@ class Chunker:
         -------
         list[ChunkTuple]
             Each element is (section_name, chunk_text, token_count).
+
+        中文：兼容旧接口。含 ``[TABLE]`` 标记的文本会拆为叙述与表格两种策略。
         """
         text = text.strip()
         if len(text) < MIN_CHUNK_CHARS:
@@ -478,6 +503,10 @@ class Chunker:
         return chunks
 
     def chunk_segment(self, segment: CleanerSegment) -> list[ChunkPayload]:
+        """Chunk one typed segment and preserve source-specific retrieval metadata.
+
+        中文：新闻标题会前置到每个 chunk；表格行跨度和电话会发言人会随 payload 一起保留。
+        """
         config = self._resolve_config(segment.source_type, segment.content_kind)
         chunk_rows: list[ChunkTuple]
 
@@ -504,7 +533,7 @@ class Chunker:
             title_prefix = segment.display_title.strip()
         table_row_cursor = 0
 
-        for chunk_idx, (_, chunk_text, token_count) in enumerate(chunk_rows):
+        for _, chunk_text, token_count in chunk_rows:
             final_text = chunk_text.strip()
             if title_prefix and not final_text.startswith(title_prefix):
                 final_text = f"{title_prefix}\n\n{final_text}"
@@ -561,6 +590,10 @@ class Chunker:
         return payloads
 
     def chunk_segments(self, segments: Sequence[CleanerSegment]) -> list[ChunkPayload]:
+        """Chunk an ordered segment sequence into a flat payload list.
+
+        中文：保持输入顺序；空段只贡献空列表，不会中断同一文档的其他段。
+        """
         all_chunks: list[ChunkPayload] = []
         for segment in segments:
             segment_chunks = self.chunk_segment(segment)
@@ -594,6 +627,8 @@ class Chunker:
         -------
         list[ChunkTuple]
             Flat list of (section_name, chunk_text, token_count).
+
+        中文：批量包装器没有额外的跨 section 合并，避免不同 SEC Item 的上下文混淆。
         """
         all_chunks: list[ChunkTuple] = []
         for section_name, text in sections:
@@ -619,6 +654,8 @@ class Chunker:
         """
         Convenience wrapper for earnings call transcript sections.
         Identical to ``chunk_section`` but exposed with an explicit name.
+
+        中文：保留显式方法名是为了让调用点表达来源语义；实际规则与普通文本分块相同。
         """
         return self.chunk_section(section, text)
 
@@ -632,7 +669,10 @@ def chunk_text(
     chunk_size: int = CHUNK_SIZE_TOKENS,
     overlap: int = CHUNK_OVERLAP_TOKENS,
 ) -> list[ChunkTuple]:
-    """Chunk a list of (section_name, text) pairs with default settings."""
+    """Chunk a list of (section_name, text) pairs with default settings.
+
+    中文：无状态便捷入口；需要来源感知分块时请传入 ``CleanerSegment`` 并调用类接口。
+    """
     chunker = Chunker(chunk_size=chunk_size, overlap=overlap)
     return chunker.chunk_sections(sections)
 
@@ -642,8 +682,6 @@ def chunk_text(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    import sys
-
     logging.basicConfig(level=logging.INFO)
     sample_text = """
     Item 7. Management's Discussion and Analysis of Financial Condition

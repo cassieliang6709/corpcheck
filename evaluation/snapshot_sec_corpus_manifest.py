@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Snapshot exact SEC filing identities from a PostgreSQL corpus.
 
+中文：从现有语料生成一次性、可验证的 filing 身份快照，供后续恢复使用；快照步骤
+只读数据库，写入已有且不同的文件时会拒绝继续。
+
 The utility is intentionally read-only and does not download filings.  Its
 write-once output can later drive an exact raw-submission recovery step without
 depending on mutable ticker/year discovery.
@@ -30,6 +33,10 @@ class ManifestError(RuntimeError):
 
 
 def validate_database_url(database_url: str) -> None:
+    """Reject non-PostgreSQL or incomplete URLs before the read-only snapshot.
+
+    中文：只接受明确的 PostgreSQL 目标，避免快照操作连接到无法识别的数据库。
+    """
     parsed = urlsplit(database_url)
     if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
         raise ManifestError("--database-url must be an explicit PostgreSQL URL")
@@ -59,6 +66,10 @@ def _required_text(row: Any, field: str) -> str:
 
 
 def normalize_filing(row: Any) -> dict[str, Any]:
+    """Convert one database filing row into the digest-protected manifest form.
+
+    中文：规范化会拒绝缺少身份字段的记录，防止后续恢复根据含糊数据下载文件。
+    """
     ticker = _required_text(row, "ticker")
     form = _required_text(row, "form")
     accession = _required_text(row, "accession")
@@ -104,6 +115,10 @@ def build_envelope(
     chunk_count: int,
     embedded_chunk_count: int,
 ) -> dict[str, Any]:
+    """Build the versioned, digest-protected manifest envelope from canonical filings.
+
+    中文：封套绑定输入统计与 payload 摘要，供恢复工具在不信任文件内容时复核。
+    """
     if chunk_count < 0 or not 0 <= embedded_chunk_count <= chunk_count:
         raise ManifestError("corpus returned invalid chunk counts")
 
@@ -171,10 +186,18 @@ async def snapshot_corpus(pool: Any) -> dict[str, Any]:
 
 
 def render_manifest(envelope: dict[str, Any]) -> str:
+    """Render the canonical manifest bytes whose digest and ordering are stable.
+
+    中文：固定序列化形式使摘要检查可复现，而非依赖 JSON 格式化的偶然差异。
+    """
     return json.dumps(envelope, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
 
 
 def write_once(path: Path, content: str) -> None:
+    """Create a manifest file only when it is absent or byte-for-byte identical.
+
+    中文：write-once 规则拒绝内容不同的既有文件，保护已冻结快照不被覆盖。
+    """
     encoded = content.encode("utf-8")
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -187,6 +210,10 @@ def write_once(path: Path, content: str) -> None:
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse read-only snapshot settings without opening a database connection.
+
+    中文：参数阶段不生成快照；数据库 URL 和 write-once 输出约束由执行路径验证。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", required=True)
     parser.add_argument("--output", required=True, type=Path)
@@ -194,6 +221,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 async def run(database_url: str) -> dict[str, Any]:
+    """Read the corpus and return one validated manifest envelope.
+
+    中文：连接只用于快照查询；数据库错误或不完整身份不会降级为部分清单。
+    """
     validate_database_url(database_url)
     pool = await asyncpg.create_pool(
         dsn=database_url,
@@ -208,6 +239,10 @@ async def run(database_url: str) -> dict[str, Any]:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Create one deterministic manifest snapshot and return a CLI status code.
+
+    中文：入口仅从数据库读取；既有且不同的输出会触发失败而不会被覆盖。
+    """
     args = parse_args(argv)
     envelope = asyncio.run(run(args.database_url))
     write_once(args.output, render_manifest(envelope))

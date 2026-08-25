@@ -1,5 +1,8 @@
 """Backfill 10-Q chunks mislabelled by the duplicate-key bug in SECTION_MAP_10Q.
 
+中文：这是一次有明确范围的历史数据修复。它依据现存 chunk 文本和位置重建标签，
+并在无法证明修复安全时保留原值，而不是重新下载或推测源文件。
+
 Background
 ----------
 ``SECTION_MAP_10Q`` defined "item 3" and "item 4" twice. Python keeps the last
@@ -126,6 +129,10 @@ def _runs(indices: list[int]) -> list[list[int]]:
 
 
 async def connect() -> asyncpg.Connection:
+    """Open the migration's explicit PostgreSQL connection.
+
+    中文：连接参数沿用本迁移既有配置；连接失败必须阻止后续标签更新。
+    """
     return await asyncpg.connect(
         host=s.DB_HOST, port=s.DB_PORT, database=s.DB_NAME,
         user=s.DB_USER, password=s.DB_PASSWORD, timeout=15,
@@ -202,6 +209,10 @@ async def build_plan(conn: asyncpg.Connection):
 
 
 async def apply(conn: asyncpg.Connection, updates) -> None:
+    """Apply the precomputed, reviewed section-label updates in one transaction.
+
+    中文：该函数不重新分类或扩大范围；数据库写入失败时由事务语义保留原有数据。
+    """
     async with conn.transaction():
         await conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {BACKUP_TABLE} (
@@ -250,6 +261,10 @@ async def apply(conn: asyncpg.Connection, updates) -> None:
 
 
 async def rollback(conn: asyncpg.Connection) -> int:
+    """Restore only rows covered by this migration's recorded reversal rules.
+
+    中文：回滚范围与修复范围同样受限，连接或 SQL 失败不会被静默忽略。
+    """
     exists = await conn.fetchval("SELECT to_regclass($1)", BACKUP_TABLE)
     if not exists:
         print(f"no backup table {BACKUP_TABLE}; nothing to roll back")
@@ -272,6 +287,10 @@ async def rollback(conn: asyncpg.Connection) -> int:
 
 
 async def report(conn: asyncpg.Connection, title: str) -> None:
+    """Print a read-only summary of affected section labels.
+
+    中文：报告用于人工确认迁移前后状态，不改变任何 chunk 或 filing 数据。
+    """
     print(f"\n-- {title} --")
     rows = await conn.fetch("""
         SELECT section_name, count(*) AS n FROM chunks
@@ -283,6 +302,10 @@ async def report(conn: asyncpg.Connection, title: str) -> None:
 
 
 async def main() -> None:
+    """Select the existing migration action and run its guarded workflow.
+
+    中文：入口保留原有交互与失败边界；未确认的修复不应继续写入数据库。
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--apply", action="store_true", help="write the changes")
     ap.add_argument("--rollback", action="store_true", help="restore from backup")

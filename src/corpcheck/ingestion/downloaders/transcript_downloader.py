@@ -8,6 +8,8 @@ ticker universe and year range.  Transcripts are split into three sections:
   - ``closing``          – operator closing / disclosures
 
 Robots.txt is respected; a polite delay is added between requests.
+
+中文：这是公开网页抓取适配器，遵守 robots.txt 并保留来源 URL；解析失败的网页不会成为空记录。
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import requests
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 
 from corpcheck.ingestion.config import (
     ALL_TICKERS,
@@ -76,12 +78,19 @@ TranscriptRow = dict[str, Any]
 # ---------------------------------------------------------------------------
 
 class _RobotsGate:
-    """Cache robots.txt rules per domain."""
+    """Cache robots.txt rules per domain.
+
+    中文：同一域名只读取一次 robots.txt；读取失败时沿用项目既有的允许策略。
+    """
 
     def __init__(self) -> None:
         self._parsers: dict[str, urllib.robotparser.RobotFileParser] = {}
 
     def can_fetch(self, url: str, user_agent: str = "*") -> bool:
+        """Return whether cached or freshly read robots.txt permits a request.
+
+        中文：该方法只做访问许可判断，不执行网络内容下载。
+        """
         parsed = urlparse(url)
         domain = f"{parsed.scheme}://{parsed.netloc}"
         if domain not in self._parsers:
@@ -109,6 +118,8 @@ def _quarter_from_title(title: str) -> tuple[int | None, int | None]:
     Extract (fiscal_year, quarter) from a transcript title like
     'Apple Q3 2021 Earnings Call Transcript'.
     Returns (None, None) if not found.
+
+    中文：标题格式不可靠时保留 ``None``，避免从正文或发布日期猜测财政季度。
     """
     year_match = re.search(r"\b(20\d{2})\b", title)
     quarter_match = re.search(r"\bQ([1-4])\b", title, re.I)
@@ -125,6 +136,8 @@ def _split_into_sections(text: str) -> dict[str, str]:
 
     Returns a dict with keys matching the section names.  If a section
     boundary isn't found the text is placed under 'prepared_remarks'.
+
+    中文：分段依赖启发式标题；未识别的内容有意保留在 prepared remarks，而不是丢弃。
     """
     sections: dict[str, str] = {
         "prepared_remarks": "",
@@ -163,6 +176,8 @@ def _extract_transcript_text(soup: BeautifulSoup) -> str:
     """
     Extract the main transcript body from a Motley Fool article page.
     Returns plain text with paragraph breaks.
+
+    中文：优先站点正文容器，找不到时才逐级回退，避免不同页面模板导致整个下载失败。
     """
     # Motley Fool transcript article body is in div.article-body
     body = soup.find("div", class_="article-body")
@@ -227,6 +242,9 @@ class TranscriptDownloader:
         HTTP timeout in seconds.
     max_pages_per_ticker:
         Max search result pages to walk per ticker.
+
+    中文：调用 Motley Fool 搜索与文章页的下载器。URL 在一次运行内去重，且所有 HTTP 请求先经过
+    robots.txt 检查。
     """
 
     def __init__(
@@ -253,6 +271,8 @@ class TranscriptDownloader:
     def _get(self, url: str) -> requests.Response | None:
         """
         Fetch *url* if robots.txt permits.  Returns None on any error.
+
+        中文：网络、状态码或 robots 拒绝都统一返回 ``None``，让批处理继续处理其他页面。
         """
         if not _robots.can_fetch(url):
             logger.info("robots.txt disallows %s, skipping", url)
@@ -273,6 +293,8 @@ class TranscriptDownloader:
         """
         Return a list of transcript article URLs for *ticker*.
         Walks multiple search-result pages.
+
+        中文：仅收集看起来像 transcript 的链接，是否可用还由后续文章解析验证。
         """
         urls: list[str] = []
         # Use the company name pattern commonly used in Motley Fool search
@@ -316,6 +338,8 @@ class TranscriptDownloader:
         """
         Fetch and parse a single Motley Fool transcript page.
         Returns a ``TranscriptRow`` dict or None if parsing fails.
+
+        中文：过短正文、重复 URL 和超出年份范围的文章均返回 ``None``，不会写入半成品记录。
         """
         if url in self._seen_urls:
             return None
@@ -368,6 +392,8 @@ class TranscriptDownloader:
         list[TranscriptRow]
             Each row has: ticker, fiscal_year, quarter, content,
             published_date, source_url, sections (dict).
+
+        中文：逐 ticker 顺序执行以保持对来源网站的礼貌节流；返回值不触及数据库。
         """
         all_rows: list[TranscriptRow] = []
 
@@ -409,7 +435,10 @@ def download_transcripts(
     tickers: list[str] | None = None,
     years: list[int] | None = None,
 ) -> list[TranscriptRow]:
-    """Shorthand for ``TranscriptDownloader().download_all()``."""
+    """Shorthand for ``TranscriptDownloader().download_all()``.
+
+    中文：为一次性脚本提供入口；需要修改请求间隔或搜索页数时请使用类接口。
+    """
     dl = TranscriptDownloader(tickers=tickers, years=years)
     return dl.download_all()
 

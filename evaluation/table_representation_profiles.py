@@ -1,4 +1,8 @@
-"""Locked baseline and candidate cleaners for table-representation evaluation."""
+"""Locked baseline and candidate cleaners for table-representation evaluation.
+
+中文：将基线与候选清洗器固定为可追溯的表示配置，以便归因评测差异；不要把这里
+的评测配置当作生产默认行为。
+"""
 
 from __future__ import annotations
 

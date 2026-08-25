@@ -1,4 +1,7 @@
-"""Claim verification overlay types and deterministic helpers."""
+"""Claim verification overlay types and deterministic helpers.
+
+中文：声明核验是检索之上的确定性规则层，负责把原文拆成可检查声明并产出可审计裁决。
+"""
 
 from corpcheck.claims.normalizer import (
     extract_numeric_bindings,

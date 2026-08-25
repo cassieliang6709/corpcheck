@@ -1,5 +1,8 @@
 """Deterministic end-to-end answer evaluation with no model or database calls.
 
+中文：这是一个纯离线的答案评分器。它将答案正确性、拒答和引文支持拆开
+测量，避免模型或数据库状态影响可复现的评测结论。
+
 Predictions are JSONL records with ``id``, ``answer``, ``abstained``, and a
 ``chunks`` list, matching CorpCheck's non-streaming chat response.  Citations in
 ``answer`` use 1-based indices (for example ``[1]`` or ``[1, 2]``) into that
@@ -311,6 +314,10 @@ def evaluate(
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse offline answer-evaluation inputs without loading predictions.
+
+    中文：仅构造评测配置，不读取或改写结果文件；参数不完整时由 argparse 在执行前退出。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--predictions", type=Path, required=True, help="JSONL prediction file")
     parser.add_argument("--gold", type=Path, required=True, help="Gold JSON list or JSONL file")
@@ -319,6 +326,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Run deterministic answer scoring and return a process-style status code.
+
+    中文：CLI 入口只协调读取、评分和报告；无效记录或文件错误会保持可见而非产出部分分数。
+    """
     args = parse_args(argv)
     try:
         result = evaluate(

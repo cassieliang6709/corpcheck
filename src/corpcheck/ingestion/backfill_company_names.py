@@ -1,5 +1,7 @@
 """
 Backfill company metadata into the database for arbitrary dumps.
+
+中文：修复已有数据库中的公司名和行业信息；它不下载 filings，也不会改变数据管道的默认范围。
 """
 
 from __future__ import annotations
@@ -21,6 +23,10 @@ from corpcheck.ingestion.metadata import (
 
 
 def _fetch_all_tickers(conn) -> list[str]:
+    """Return every nonempty ticker referenced by an ingestion table.
+
+    中文：从多个表取并集，确保孤立的历史记录也能获得元数据回填。
+    """
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -44,6 +50,11 @@ def _fetch_all_tickers(conn) -> list[str]:
 
 
 def main() -> None:
+    """Backfill missing company metadata and print a compact change summary.
+
+    中文：``companies`` 只替换未解析字段；``chunks.sector`` 则会无条件同步为
+    当前解析结果，即使旧值不是空值。
+    """
     conn = _connect(DATABASE_URL)
     inserted_companies = 0
     updated_companies = 0

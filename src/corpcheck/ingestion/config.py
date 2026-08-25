@@ -1,6 +1,9 @@
 """
 Pipeline configuration: tickers, years, FRED series, DB settings,
 and model hyperparameters.
+
+中文：集中保存离线管道的默认配置。环境变量只覆盖指定项；不要在业务代码中重复这些
+默认值，以免下载、处理和加载阶段使用不一致的配置。
 """
 
 import os
@@ -34,7 +37,7 @@ SECTORS: dict[str, list[str]] = {
 }
 
 # Canonical company display names for the project universe.
-# These provide a stable fallback when upstream market metadata is incomplete.
+# 中文：当上游市场元数据缺失时，用这些稳定的人工维护名称兜底。
 TICKER_TO_COMPANY_NAME: dict[str, str] = {
     "JPM": "JPMorgan Chase & Co.",
     "BAC": "Bank of America Corporation",
@@ -111,10 +114,12 @@ TICKER_TO_COMPANY_NAME: dict[str, str] = {
     "VZ": "Verizon Communications Inc.",
 }
 
-# Flat list of all project tickers
+# Flat list of all project tickers.
+# 中文：默认抓取范围由行业映射派生，避免维护第二份容易漂移的列表。
 ALL_TICKERS: list[str] = [t for tickers in SECTORS.values() for t in tickers]
 
-# Reverse lookup: ticker -> sector
+# Reverse lookup: ticker -> sector.
+# 中文：元数据解析优先使用此映射，避免依赖外部供应商的非标准行业标签。
 TICKER_TO_SECTOR: dict[str, str] = {
     ticker: sector
     for sector, tickers in SECTORS.items()
@@ -199,6 +204,7 @@ SEC_DOWNLOAD_DIR: str = os.getenv("SEC_DOWNLOAD_DIR", "./data/sec_filings")
 # Resources was acquired by Exxon in 2024, so its filings landed under
 # 0001038357. Map those directories back to the ticker the rest of the pipeline
 # (and the companies table) uses.
+# 中文：退市或并购公司可能只能按 CIK 落盘；该映射把它还原为项目内统一使用的 ticker。
 SEC_TICKER_ALIASES: dict[str, str] = {
     "0001038357": "PXD",
 }

@@ -4,6 +4,9 @@ Backfill news article chunks into ``news_chunks``.
 Reads existing rows from ``news_articles``, chunks each article body, and
 stores the result in ``news_chunks`` so news can participate in text-level
 retrieval alongside SEC filing chunks.
+
+中文：该工具从已有新闻正文重建可检索 chunk；每篇文章先单独提交删除，再分批
+写入新结果。该过程不是原子替换，失败后可通过重跑修复。
 """
 
 from __future__ import annotations
@@ -27,7 +30,10 @@ def _fetch_news_articles(
     loader: DBLoader,
     ticker: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return existing news article rows from the database."""
+    """Return existing news article rows from the database.
+
+    中文：只读取至少有正文或摘要的文章；可选 ticker 筛选不会改变返回字段。
+    """
     sql = """
         SELECT id, ticker, title, content, summary, published_date, source, source_url
         FROM news_articles
@@ -59,7 +65,10 @@ def _fetch_news_articles(
 
 
 def _article_text(article: dict[str, Any]) -> str:
-    """Assemble a chunkable text body for one article."""
+    """Assemble a chunkable text body for one article.
+
+    中文：标题、摘要和正文按可读顺序拼接，空字段会被跳过。
+    """
     title = (article.get("title") or "").strip()
     summary = (article.get("summary") or "").strip()
     content = (article.get("content") or "").strip()
@@ -68,6 +77,10 @@ def _article_text(article: dict[str, Any]) -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Rebuild news chunks, optionally restricted to one ticker.
+
+    中文：``--skip-embed`` 只省略向量生成，仍会重建文本和结构化特征。
+    """
     parser = argparse.ArgumentParser(description="Backfill news_chunks from news_articles")
     parser.add_argument("--dsn", default=DATABASE_URL, help="PostgreSQL DSN")
     parser.add_argument("--ticker", default=None, help="Optional ticker filter")

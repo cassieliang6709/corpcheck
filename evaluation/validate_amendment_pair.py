@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Validate one real SEC original/amendment pair in an isolated database.
 
+中文：使用允许列表中的原件/修订件在隔离数据库验证修订处理路径；保护检查会拒绝
+基准库、默认下载目录和非预期输入，以防评测脚本影响真实语料。
+
 The runner is deliberately fixture-locked and refuses CorpCheck's benchmark
 database and default SEC download directory. It is not a general ingestion CLI.
 """
@@ -56,6 +59,11 @@ class ValidationError(RuntimeError):
 
 @dataclass(frozen=True)
 class BenchmarkSnapshot:
+    """Baseline corpus counts used to prove the benchmark remained untouched.
+
+    中文：隔离验证前后的公开基准快照；计数发生变化即表示该验证不再可信。
+    """
+
     companies: int
     filings: int
     chunks: int
@@ -420,6 +428,10 @@ def import_and_validate(
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse isolated amendment-fixture validation settings without side effects.
+
+    中文：仅收集明确的隔离路径与数据库参数；安全边界和 fixture 身份在运行阶段 fail-closed 检查。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", required=True, help="Existing isolated target DB URL")
     parser.add_argument("--download-dir", required=True, type=Path)
@@ -438,6 +450,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Validate the allowlisted amendment pair and return its CLI status.
+
+    中文：入口拒绝运行在公开基准库或默认下载目录上，避免把评测修复误用于真实语料。
+    """
     args = parse_args(argv)
     sec_user_agent = os.getenv("SEC_USER_AGENT", SEC_USER_AGENT)
     validate_isolation(

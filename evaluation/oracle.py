@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Compute the achievable ceiling for the IR metric — the suite's own sanity check.
 
+中文：先计算指标在当前切块下可达到的理论上限，用来区分“检索失败”和“指标本身
+不可达”；它不调用在线模型，也不修改语料。
+
 A weak-supervision metric can fail for two very different reasons: the retriever
 is bad, or the metric is unachievable by construction. If our chunker splits a
 gold evidence page into five pieces, no single chunk can ever cover 50% of it and
@@ -140,6 +143,10 @@ def print_ceiling(result: dict[str, Any]) -> None:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Run the asynchronous metric-ceiling check from the command line.
+
+    中文：入口计算当前语料的可达上限；数据库或语料不满足前提时不应把结果当作有效基线。
+    """
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Repair and validate the fixture-locked CVS FY2018 10-K in isolation.
 
+中文：在隔离位置修复一个固定的 CVS 样本并验证检索，不把它扩展为通用导入命令；
+任何会触及公开基准语料的配置都会被拒绝。
+
 This runner is intentionally not a general ingestion command. It downloads one
 allowlisted SEC accession into a pristine, explicit directory, imports it into
 an existing pristine database, and proves that CorpCheck can retrieve both
@@ -290,6 +293,10 @@ def import_and_validate(
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse fixture-locked CVS validation inputs before network or DB access.
+
+    中文：参数阶段不下载或导入；隔离目录、固定 accession 与数据库前置条件在执行中验证。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", required=True, help="Existing pristine target DB URL")
     parser.add_argument("--download-dir", required=True, type=Path)
@@ -307,6 +314,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Run the CVS fixture validation and expose isolation failures to the shell.
+
+    中文：入口不将样本修复泛化为生产导入，任何环境漂移都会中止验证。
+    """
     args = parse_args(argv)
     sec_user_agent = os.getenv("SEC_USER_AGENT", SEC_USER_AGENT)
     validate_isolation(

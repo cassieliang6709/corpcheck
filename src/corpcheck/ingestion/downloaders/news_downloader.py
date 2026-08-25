@@ -7,6 +7,8 @@ Fetches financial news from a mix of sources:
   - Reuters RSS
 
 Articles are deduplicated by URL. Content and title are combined for embedding.
+
+中文：新闻来源质量与格式各异，本模块只提取可溯源的文章文本并按 URL 去重；它不判断内容真假。
 """
 
 from __future__ import annotations
@@ -65,7 +67,10 @@ OFFICIAL_NEWSROOM_SOURCES: dict[str, dict[str, Any]] = {
 # ---------------------------------------------------------------------------
 
 def _parse_published(entry: Any) -> datetime | None:
-    """Parse the published date from a feedparser entry."""
+    """Parse the published date from a feedparser entry.
+
+    中文：按多个常见字段依次尝试；无法识别日期时返回 ``None``，由筛选逻辑决定是否保留。
+    """
     for field in ("published", "updated", "created"):
         raw = getattr(entry, field, None)
         if raw:
@@ -82,7 +87,10 @@ def _parse_published(entry: Any) -> datetime | None:
 
 
 def _clean_html(html_text: str) -> str:
-    """Strip HTML tags from a string."""
+    """Strip HTML tags from a string.
+
+    中文：解析失败时返回原文本，避免一个格式异常的摘要中断整批下载。
+    """
     try:
         soup = BeautifulSoup(html_text, "lxml")
         return soup.get_text(separator=" ", strip=True)
@@ -91,7 +99,10 @@ def _clean_html(html_text: str) -> str:
 
 
 def _normalise_datetime(value: datetime | None) -> datetime | None:
-    """Return a timezone-aware UTC datetime when possible."""
+    """Return a timezone-aware UTC datetime when possible.
+
+    中文：无时区的来源时间按 UTC 解释；该约定保证年筛选在不同 RSS 来源间一致。
+    """
     if value is None:
         return None
     if value.tzinfo is None:
@@ -142,7 +153,10 @@ def _extract_published_from_soup(soup: BeautifulSoup) -> datetime | None:
 
 
 def _extract_article_text(soup: BeautifulSoup) -> str:
-    """Extract the article body from a newsroom page."""
+    """Extract the article body from a newsroom page.
+
+    中文：优先正文容器，移除导航和脚本，并去掉响应式页面中常见的重复段落。
+    """
     body = soup.find("article") or soup.find("main") or soup.body or soup
     for tag in body.find_all(["nav", "aside", "footer", "script", "style", "noscript", "form"]):
         tag.decompose()
@@ -168,6 +182,8 @@ def _entry_to_row(entry: Any, ticker: str | None, source: str) -> NewsRow | None
     """
     Convert a feedparser entry dict into a ``NewsRow`` dict.
     Returns None if the entry has no URL (cannot deduplicate).
+
+    中文：URL 是跨来源去重和溯源的最小条件；缺少 URL 的条目有意丢弃。
     """
     url: str | None = getattr(entry, "link", None)
     if not url:
@@ -219,6 +235,9 @@ class NewsDownloader:
         HTTP request timeout in seconds.
     include_reuters:
         If True, also fetch Reuters RSS feeds (not ticker-specific).
+
+    中文：新闻采集器维护一次运行范围内的 URL 集合。官方 newsroom 可用时优先使用，以提高
+    可追溯性；否则才回退到 Yahoo RSS。
     """
 
     def __init__(
@@ -271,7 +290,10 @@ class NewsDownloader:
         ticker: str | None,
         source: str,
     ) -> list[NewsRow]:
-        """Convert feedparser entries to NewsRow dicts, deduplicating by URL."""
+        """Convert feedparser entries to NewsRow dicts, deduplicating by URL.
+
+        中文：年份筛选优先使用发布日期，缺失时才从 URL 中提取年份。
+        """
         rows: list[NewsRow] = []
         for entry in getattr(feed, "entries", []):
             row = _entry_to_row(entry, ticker, source)
@@ -295,7 +317,10 @@ class NewsDownloader:
         source: str,
         fallback_title: str = "",
     ) -> NewsRow | None:
-        """Fetch one official newsroom article and convert it to a NewsRow."""
+        """Fetch one official newsroom article and convert it to a NewsRow.
+
+        中文：只有同时得到标题和正文的页面才可入库，避免导航页或错误页成为检索材料。
+        """
         resp = self._fetch_url(article_url)
         if resp is None:
             return None
@@ -353,7 +378,10 @@ class NewsDownloader:
         listing_url: str,
         article_path_pattern: re.Pattern[str],
     ) -> list[tuple[str, str]]:
-        """Extract matching article links from an official newsroom listing page."""
+        """Extract matching article links from an official newsroom listing page.
+
+        中文：调用方提供路径模式，避免把同站点的导航、招聘等无关链接当成新闻。
+        """
         resp = self._fetch_url(listing_url)
         if resp is None:
             return []
@@ -383,7 +411,10 @@ class NewsDownloader:
     # ------------------------------------------------------------------
 
     def fetch_official_news(self, ticker: str) -> list[NewsRow]:
-        """Fetch official newsroom items for one ticker when supported."""
+        """Fetch official newsroom items for one ticker when supported.
+
+        中文：没有配置官方来源的 ticker 返回空列表，供上层决定是否回退到 RSS。
+        """
         config = OFFICIAL_NEWSROOM_SOURCES.get(ticker)
         if config is None:
             return []
@@ -419,7 +450,10 @@ class NewsDownloader:
     # ------------------------------------------------------------------
 
     def fetch_yahoo_news(self, ticker: str) -> list[NewsRow]:
-        """Fetch Yahoo Finance RSS for a single ticker."""
+        """Fetch Yahoo Finance RSS for a single ticker.
+
+        中文：结果仍经过运行级 URL 去重和年份筛选。
+        """
         url = YAHOO_RSS_URL.format(ticker=ticker)
         feed = self._fetch_feed(url)
         rows = self._process_feed(feed, ticker, "yahoo_rss")
@@ -431,7 +465,10 @@ class NewsDownloader:
     # ------------------------------------------------------------------
 
     def fetch_reuters_news(self) -> list[NewsRow]:
-        """Fetch Reuters business/company RSS feeds (not ticker-specific)."""
+        """Fetch Reuters business/company RSS feeds (not ticker-specific).
+
+        中文：Reuters 行没有强行绑定 ticker，避免将宏观新闻错误归属给公司。
+        """
         rows: list[NewsRow] = []
         for feed_url in REUTERS_RSS_FEEDS:
             feed = self._fetch_feed(feed_url)
@@ -454,6 +491,8 @@ class NewsDownloader:
         -------
         list[NewsRow]
             Deduplicated list of news article dicts.
+
+        中文：每次完整下载都会清空本次运行的去重状态，不会跨进程隐式保留旧 URL。
         """
         all_rows: list[NewsRow] = []
         self._seen_urls.clear()
@@ -495,7 +534,10 @@ def download_news(
     include_reuters: bool = True,
     official_only: bool = False,
 ) -> list[NewsRow]:
-    """Shorthand for ``NewsDownloader().download_all()``."""
+    """Shorthand for ``NewsDownloader().download_all()``.
+
+    中文：为一次性任务提供便捷入口；复杂抓取配置请直接构造下载器。
+    """
     dl = NewsDownloader(
         tickers=tickers,
         years=years,

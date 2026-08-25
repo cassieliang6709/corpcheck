@@ -1,3 +1,8 @@
+"""HTTP boundary for retrieval, answerability, claim checks, and grounded chat.
+
+中文：本模块只把 HTTP 请求编排到领域服务；检索、置信度和声明核验规则分别保留在专属模块中。
+"""
+
 import hmac
 import json
 import logging
@@ -37,6 +42,10 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Prepare shared dependencies before serving, then release them on shutdown.
+
+    中文：启动时预热数据库、公司别名和嵌入模型，让配置错误在首个用户请求前暴露。
+    """
     pool = await get_pool()
     await load_known_tickers(pool)
     # Fail during startup, rather than on the first user's request, if the
@@ -62,7 +71,10 @@ app.add_middleware(
 async def require_api_key(
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> None:
-    """No-op when API_KEY env var is empty; otherwise require a matching header."""
+    """Enforce the optional API-key boundary without leaking timing information.
+
+    中文：空配置保持本地开发可用；配置密钥后使用常量时间比较请求头，避免时序泄露。
+    """
     if not config.API_KEY:
         return
     if not x_api_key or not hmac.compare_digest(x_api_key, config.API_KEY):
@@ -71,11 +83,15 @@ async def require_api_key(
 
 @app.get("/health")
 async def health():
+    # Liveness intentionally does not touch the database. 中文：存活探针只确认进程可响应，
+    # 不把暂时的下游依赖故障误报为进程崩溃。
     return {"status": "ok"}
 
 
 @app.get("/filters", response_model=FilterOptionsResponse)
 async def filters_endpoint():
+    # Return current corpus facets instead of hard-coding UI options. 中文：筛选项从现有
+    # 数据库内容读取，避免导入范围变化后前端仍显示不存在的选项。
     pool = await get_pool()
     async with pool.acquire() as conn:
         companies = await conn.fetch(
@@ -112,6 +128,8 @@ async def filters_endpoint():
 
 @app.post("/retrieve", response_model=RetrieveResponse)
 async def retrieve_endpoint(req: RetrieveRequest):
+    # Keep this boundary thin so HTTP and MCP share identical ranking. 中文：路由仅转发
+    # 已验证输入，实际解析、检索和融合统一由 retrieve() 执行。
     pool = await get_pool()
     chunks = await retrieve(
         pool=pool,
@@ -129,6 +147,8 @@ async def retrieve_endpoint(req: RetrieveRequest):
 @app.post("/answerability", response_model=AnswerabilityResponse)
 async def answerability_endpoint(req: AnswerabilityRequest):
     """Retrieve evidence and apply the same pre-LLM gate used by chat and MCP."""
+    # This endpoint never calls an LLM. 中文：它公开回答前的证据门控结果，供客户端在
+    # 生成前决定是否应继续，避免把弱证据包装成流畅回答。
     pool = await get_pool()
     chunks = await retrieve(
         pool=pool,
@@ -176,6 +196,8 @@ async def answerability_endpoint(req: AnswerabilityRequest):
 @app.post("/claims/extract", response_model=ClaimCheckResponse)
 async def claims_extract_endpoint(req: ClaimEvaluationRequest):
     """Extract atomic claim units from text (deterministic, no LLM)."""
+    # Extraction is deliberately separate from verification. 中文：此路由只显示文本可拆成
+    # 哪些声明，不查询数据库也不判定真伪。
     claims = normalize_claims(req)
     return ClaimCheckResponse(
         source_text=req.source_text,
@@ -185,6 +207,10 @@ async def claims_extract_endpoint(req: ClaimEvaluationRequest):
 
 
 def _to_claim_evidence(item) -> ClaimEvidenceResponse:
+    """Convert internal evidence into the public response representation.
+
+    中文：在 API 边界统一处理 Decimal 到 JSON 数值的转换，领域层仍保留精确值。
+    """
     return ClaimEvidenceResponse(
         claim_id=item.claim_id,
         source=item.source,
@@ -199,6 +225,8 @@ def _to_claim_evidence(item) -> ClaimEvidenceResponse:
 @app.post("/claims/verify", response_model=ClaimCheckResponse)
 async def claims_verify_endpoint(req: ClaimVerificationRequest):
     """Run deterministic claim verification against retrieved evidence."""
+    # Retrieve per claim to keep evidence attributable. 中文：每个原子声明独立检索，避免
+    # 一个声明的候选片段被错误复用为另一个声明的证据。
     claims = normalize_claims(req)
     pool = await get_pool()
 
@@ -241,6 +269,8 @@ async def claims_verify_endpoint(req: ClaimVerificationRequest):
 
 @app.post("/chat", dependencies=[Depends(require_api_key)])
 async def chat_endpoint(req: ChatRequest, request: Request):
+    # Gate before generation so the model never sees evidence deemed inadequate. 中文：先做
+    # 检索与拒答判断，再接触 LLM，避免模型从薄弱上下文中猜测。
     if not config.SGLANG_BASE_URL:
         raise HTTPException(
             status_code=503,

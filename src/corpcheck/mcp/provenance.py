@@ -11,6 +11,9 @@ chunk id. Version governance (which amendment supersedes which filing) is *not*
 reimplemented — :mod:`corpcheck.retrieval.revision` owns that, and this module
 calls into it so the MCP path and the HTTP path can never disagree about which
 filings are still authoritative.
+
+中文：MCP 在检索排序之后批量补齐 accession 等溯源字段；修订治理始终复用检索层规则，
+避免两个入口给出不同结论。
 """
 
 from __future__ import annotations
@@ -42,6 +45,8 @@ async def load_filing_provenance(
     than globally, so passing a news chunk's id into a ``chunks`` query could
     collide with an unrelated filing chunk. Non-SEC ids are simply absent from the
     returned map and the caller reports ``accession_number: null``.
+
+    中文：只查询 SEC 片段，避免不同来源复用 chunk_id 时发生碰撞；没有溯源的来源保留为空值。
     """
     sec_ids = [c.chunk_id for c in chunks if c.source_type == "sec"]
     numeric_ids = []
@@ -85,6 +90,8 @@ def evidence_block(
     Provenance fields sit at the top level rather than in a nested object because
     the consumer is a language model: a flat record with unambiguous key names is
     quoted correctly more often than a nested one.
+
+    中文：扁平字段降低模型引用嵌套 JSON 时遗漏来源的风险；截断状态明确返回给调用方。
     """
     prov = provenance or {}
     text = chunk.text
@@ -127,6 +134,8 @@ async def superseded_check(
     check the direct-lookup tool would become a hole in the governance the search
     tool enforces: an agent that saw a superseded accession elsewhere could still
     pull its text verbatim.
+
+    中文：直接按文件读取同样要执行修订检查，否则工具会绕过搜索路径的权威性保护。
     """
     if is_amendment(row.get("filing_type")):
         return False, None
@@ -159,6 +168,8 @@ async def filter_superseded_context_rows(
     A context window and an accession lookup can contain several sections. The
     filing-level metadata identifies the revision group, while each row's own
     ``section_name`` determines whether that particular text remains authoritative.
+
+    中文：同一文件窗口可跨多个章节，因此逐行按章节过滤，而不是把整个文件一概隐藏。
     """
     candidates = [
         {

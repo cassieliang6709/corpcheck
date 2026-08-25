@@ -2,6 +2,8 @@
 
 This is the single entry point used by both the HTTP API and the offline IR
 evaluation harness, so both measure exactly the same code path.
+
+中文：HTTP、MCP 和离线评估共享此入口，确保线上回答与离线指标使用相同的解析、候选和排序规则。
 """
 
 from __future__ import annotations
@@ -59,7 +61,10 @@ async def retrieve(
     fiscal_year: Optional[int] = None,
     fusion_strategy: Optional[str] = None,
 ) -> list[ChunkResult]:
-    """Return the top-``k`` chunks for ``query`` under the given metadata filters."""
+    """Return top-``k`` evidence chunks under metadata filters and hybrid ranking.
+
+    中文：顺序为查询解析、dense/BM25 候选、可选表格子行、修订过滤、融合与轻量重排；不生成答案。
+    """
     strat = fusion_strategy or FUSION_STRATEGY
     resolved_company = resolve_company_filter(company)
     detected_company = None if resolved_company else detect_company_in_query(query)
@@ -82,6 +87,10 @@ async def retrieve(
     scope_company = detected_company if COMPANY_SCOPE_ENABLED else None
 
     async def _candidates(company_filter: Optional[str]):
+        """Run the dense and sparse candidate arms for one company scope.
+
+        中文：内部助手复用同一过滤和 boost 参数；公司检测失败时外层可安全地重试无范围查询。
+        """
         filter_where, filter_params = build_filter_clause(
             sector, resolved_company or company_filter, effective_filing_type, fiscal_year
         )

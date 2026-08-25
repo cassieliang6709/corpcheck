@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Validate the locked AMZN 2019 and NKE 2018 table filings in isolation."""
+"""Validate the locked AMZN 2019 and NKE 2018 table filings in isolation.
+
+中文：针对锁定的两份表格 filing 比较表示策略，所有导入和检索检查均在隔离环境中
+执行；基准数据或前置条件发生漂移时应失败而不是重新解释结果。
+"""
 
 from __future__ import annotations
 
@@ -49,6 +53,11 @@ STRICT_OVERLAP_THRESHOLD = 0.5
 
 @dataclass(frozen=True)
 class FilingSpec:
+    """Allowlisted filing and evidence expectations for table-profile validation.
+
+    中文：表格表示对比中唯一允许导入的 filing 及其证据断言，避免测试随发现结果变化。
+    """
+
     ticker: str
     fiscal_year: int
     accession: str
@@ -357,6 +366,10 @@ def import_and_validate(
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse locked table-pair validation paths before any database mutation.
+
+    中文：这里只生成配置；允许列表、基准不变性和隔离目标均由执行流程严格确认。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", required=True, help="Existing pristine target DB URL")
     parser.add_argument("--download-dir", required=True, type=Path)
@@ -374,6 +387,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Validate the two fixed table filings and return a process-style status.
+
+    中文：入口只服务于表示对比；安全检查失败时不继续导入或报告可比较结果。
+    """
     args = parse_args(argv)
     validate_isolation(
         args.database_url,

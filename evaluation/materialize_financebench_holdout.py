@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Materialize the frozen company-disjoint FinanceBench 10-K held-out set."""
+"""Materialize the frozen company-disjoint FinanceBench 10-K held-out set.
+
+中文：物化公司互斥的冻结留出集，并用行数和内容哈希保护评测口径；任何已有
+输出与预期不符都会拒绝覆盖。
+"""
 
 from __future__ import annotations
 
@@ -32,6 +36,10 @@ class ContractError(ValueError):
 
 
 def sha256_file(path: Path) -> str:
+    """Return the SHA-256 digest used to lock a source artifact.
+
+    中文：读取失败会直接传播，避免未知内容被当作冻结输入。
+    """
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
@@ -40,10 +48,18 @@ def sha256_file(path: Path) -> str:
 
 
 def sha256_text(content: str) -> str:
+    """Return the deterministic UTF-8 digest for generated artifact content.
+
+    中文：内容哈希是冻结输出契约的一部分，不能以格式相近替代字节一致。
+    """
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Load JSONL rows and reject malformed or non-object records.
+
+    中文：输入必须完整可解析，防止损坏的基准文件悄悄减少评测样本。
+    """
     rows: list[dict[str, Any]] = []
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
@@ -56,6 +72,10 @@ def load_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def load_json_list(path: Path) -> list[dict[str, Any]]:
+    """Load a JSON object list while preserving the frozen source order.
+
+    中文：格式或记录类型错误会显式失败，不能被静默转换为可用留出集。
+    """
     rows = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         raise ContractError(f"{path} must contain a JSON list of objects")
@@ -114,6 +134,10 @@ def select_holdout(
 
 
 def validate_frozen_counts(rows: Sequence[dict[str, Any]]) -> None:
+    """Enforce the fixed row, document, and company cardinalities of the holdout.
+
+    中文：计数是评测口径的一部分，任何变更都应阻止重新物化。
+    """
     documents = {str(row["doc_name"]) for row in rows}
     companies = {str(row["company"]) for row in rows}
     actual = (len(rows), len(documents), len(companies))
@@ -151,10 +175,18 @@ def build_ingestion_manifest(rows: Sequence[dict[str, Any]]) -> list[dict[str, A
 
 
 def render_json(rows: Sequence[dict[str, Any]]) -> str:
+    """Render canonical held-out rows for the write-once artifact contract.
+
+    中文：固定 JSON 形式让内容哈希能够检测排序或字段漂移。
+    """
     return json.dumps(list(rows), indent=2, ensure_ascii=False) + "\n"
 
 
 def validate_content_hashes(output_content: str, manifest_content: str) -> None:
+    """Verify generated artifacts match their frozen expected SHA-256 values.
+
+    中文：哈希不匹配即说明评测定义发生变化，绝不能继续写入新结果。
+    """
     if sha256_text(output_content) != EXPECTED_OUTPUT_SHA256:
         raise ContractError("held-out content SHA-256 does not match frozen contract")
     if sha256_text(manifest_content) != EXPECTED_MANIFEST_SHA256:
@@ -162,6 +194,10 @@ def validate_content_hashes(output_content: str, manifest_content: str) -> None:
 
 
 def assert_writeable(path: Path, content: str) -> None:
+    """Allow an output path only when absent or already identical to content.
+
+    中文：这是冻结文件的覆盖保护；不同内容必须交由显式版本化流程处理。
+    """
     if path.exists():
         if path.read_text(encoding="utf-8") == content:
             return
@@ -169,6 +205,10 @@ def assert_writeable(path: Path, content: str) -> None:
 
 
 def write_once(path: Path, content: str) -> None:
+    """Persist a verified frozen artifact without replacing different bytes.
+
+    中文：写入前再次执行契约检查，避免调用方意外覆盖已发布留出集。
+    """
     assert_writeable(path, content)
     if path.exists():
         return
@@ -177,6 +217,10 @@ def write_once(path: Path, content: str) -> None:
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse frozen-split paths without reading or replacing their contents.
+
+    中文：只收集路径配置；哈希、行数和 write-once 约束仍由主流程严格执行。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--development", type=Path, default=DEFAULT_DEVELOPMENT)
@@ -186,6 +230,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Materialize the frozen holdout only when every contract check passes.
+
+    中文：入口绝不覆盖内容不同的既有冻结产物，任何漂移都以失败结束。
+    """
     args = parse_args(argv)
     if sha256_file(args.source) != SOURCE_SHA256:
         raise ContractError("official FinanceBench source SHA-256 does not match source lock")

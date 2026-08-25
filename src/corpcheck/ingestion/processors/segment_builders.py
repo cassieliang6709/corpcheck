@@ -1,3 +1,9 @@
+"""Build source-aware segments for news and transcript documents.
+
+中文：新闻和电话会文本不适合直接套用 SEC Item 分段，因此在这里保留文章标题、发言人和问答
+配对等对检索有用的结构。
+"""
+
 from __future__ import annotations
 
 import re
@@ -10,6 +16,10 @@ _SPEAKER_RE = re.compile(r"^(?P<speaker>[A-Z][A-Za-z0-9 .,&'/-]{1,80}):\s*(?P<bo
 
 
 def build_news_segments(article: dict[str, Any]) -> list[CleanerSegment]:
+    """Turn one stored article into narrative or table-aware news segments.
+
+    中文：含 HTML 表格的正文交给清洗器保留行列结构；纯文本文章保持为单个可分块段落。
+    """
     title = (article.get("title") or "").strip()
     summary = (article.get("summary") or "").strip()
     content = (article.get("content") or "").strip()
@@ -54,6 +64,10 @@ def build_news_segments(article: dict[str, Any]) -> list[CleanerSegment]:
 
 
 def _speaker_turns(text: str) -> list[dict[str, str]]:
+    """Group transcript paragraphs under their most recently recognised speaker.
+
+    中文：未匹配说话人格式的段落附加到上一轮发言，避免因排版变化遗失内容。
+    """
     turns: list[dict[str, str]] = []
     current_speaker: str | None = None
     current_parts: list[str] = []
@@ -90,6 +104,10 @@ def build_transcript_segments(
     quarter: int,
     sections: dict[str, str],
 ) -> list[CleanerSegment]:
+    """Create speaker turns and Q&A pairs for one earnings-call transcript.
+
+    中文：问答区按相邻两轮组成候选问答对；其他区按发言人分段，便于检索保留上下文归属。
+    """
     segments: list[CleanerSegment] = []
     qa_pair_index = 0
 

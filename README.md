@@ -1,5 +1,7 @@
 # CorpCheck
 
+[English](README.md) · [简体中文](README.zh-CN.md)
+
 Audit-grade fundamental research over SEC filings.
 
 CorpCheck is not a generic RAG wrapper. It is built on the premise that generic

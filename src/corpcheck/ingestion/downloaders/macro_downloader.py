@@ -5,12 +5,14 @@ Downloads the configured FRED series for the 2019-2023 window and returns
 rows ready for the ``macro_indicators`` table.  Different series have
 different native frequencies (daily, monthly, quarterly); we forward-fill
 to a common daily index so downstream consumers can join on date easily.
+
+中文：不同频率的宏观指标会向前填充到日粒度，便于与交易日数据关联；原始发布频率不会在此
+模块中被推断或修正。
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import date
 from typing import Any
 
 import pandas as pd
@@ -46,6 +48,9 @@ class MacroDownloader:
     fill_method:
         Pandas fill-forward method applied to non-daily series.
         'ffill' propagates the last observation; use 'bfill' for backward fill.
+
+    中文：FRED 的下载适配器。输出是可直接入库的日频字典；填充只处理频率差异，不能补回
+    数据供应商完全缺失的观测值。
     """
 
     def __init__(
@@ -82,6 +87,8 @@ class MacroDownloader:
             FRED series identifier (e.g. ``"DFF"``).
         series_name:
             Human-readable label stored in the ``series_name`` column.
+
+        中文：单个序列失败只记录告警并返回空列表，允许批量任务继续处理其他指标。
         """
         rows: list[MacroRow] = []
         try:
@@ -148,6 +155,8 @@ class MacroDownloader:
         """
         Download all series in *series* (default: ``FRED_SERIES`` from
         config) and return a flat list of ``MacroRow`` dicts.
+
+        中文：按配置顺序下载；返回扁平列表，而不是把来源数据帧泄漏给加载层。
         """
         series = series or FRED_SERIES
         all_rows: list[MacroRow] = []
@@ -175,6 +184,8 @@ class MacroDownloader:
         """
         Return a wide-format DataFrame with one column per series,
         indexed by date.  Useful for exploratory analysis.
+
+        中文：这是分析辅助接口，不参与主导入流程，也不会改变已下载的数据。
         """
         series = series or FRED_SERIES
         frames: dict[str, pd.Series] = {}
@@ -206,7 +217,10 @@ def download_macro_data(
     start_date: str = START_DATE,
     end_date: str = END_DATE,
 ) -> list[MacroRow]:
-    """Shorthand for ``MacroDownloader().download_all()``."""
+    """Shorthand for ``MacroDownloader().download_all()``.
+
+    中文：为简单脚本保留的函数式入口；需要复用客户端时请直接使用 ``MacroDownloader``。
+    """
     dl = MacroDownloader(api_key=api_key, start_date=start_date, end_date=end_date)
     return dl.download_all()
 

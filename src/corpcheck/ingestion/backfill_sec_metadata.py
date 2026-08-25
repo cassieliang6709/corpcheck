@@ -1,5 +1,7 @@
 """
 Backfill SEC filing metadata and chunk-level data signals for an existing DB.
+
+中文：该维护脚本从本地 filing 元数据重推报告期，并为既有 chunk 重算轻量检索特征。
 """
 
 from __future__ import annotations
@@ -27,6 +29,10 @@ from corpcheck.ingestion.loaders.db_loader import _connect
 
 
 def _load_filing_rows(conn) -> list[dict]:
+    """Load local 10-K and 10-Q rows that have enough data to infer metadata.
+
+    中文：没有本地路径的记录无法读取 submission 信息，因此有意排除。
+    """
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -43,6 +49,10 @@ def _load_filing_rows(conn) -> list[dict]:
 
 
 def _prepare_filing_updates(rows: list[dict]) -> list[dict]:
+    """Derive corrected filing fields and reject collisions before any SQL update.
+
+    中文：先在内存检查新业务键是否重复，防止部分更新后才触发数据库唯一约束错误。
+    """
     updates: list[dict] = []
     for row in rows:
         local_path = Path(row["local_path"])
@@ -94,6 +104,10 @@ def _prepare_filing_updates(rows: list[dict]) -> list[dict]:
 
 
 def _apply_filing_updates(conn, updates: list[dict]) -> int:
+    """Apply filing and dependent chunk metadata updates in one caller-owned transaction.
+
+    中文：先临时移动冲突的业务键，再写最终值，以安全处理年度或期间互换。
+    """
     changed_keys = [
         row
         for row in updates
@@ -149,6 +163,10 @@ def _apply_filing_updates(conn, updates: list[dict]) -> int:
 
 
 def _backfill_chunk_features(conn) -> int:
+    """Recompute deterministic numeric signals in bounded primary-key batches.
+
+    中文：每批提交一次，降低长时间维护任务的锁定和回滚成本。
+    """
     total = 0
     last_id = 0
     while True:
@@ -193,6 +211,10 @@ def _backfill_chunk_features(conn) -> int:
 
 
 def main() -> None:
+    """Run the metadata and chunk-feature repair workflow.
+
+    中文：脚本自行管理连接关闭；任一步失败会向调用者暴露错误。
+    """
     conn = _connect(DATABASE_URL)
     try:
         filing_rows = _load_filing_rows(conn)

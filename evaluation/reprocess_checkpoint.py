@@ -1,4 +1,8 @@
-"""Crash-safe, tamper-evident filesystem checkpoints for corpus reprocessing."""
+"""Crash-safe, hash-chained filesystem checkpoints for corpus reprocessing.
+
+中文：重处理过程使用 SHA-256 哈希链，以便崩溃后安全恢复，并检测损坏或未同步
+重算摘要的修改。它不是带密钥的认证签名；格式不满足运行契约时必须停止恢复。
+"""
 
 from __future__ import annotations
 
@@ -25,6 +29,12 @@ class CheckpointError(RuntimeError):
 
 @dataclasses.dataclass(frozen=True)
 class RunContract:
+    """Immutable identity and configuration contract for one reprocessing run.
+
+    中文：将源/目标数据库、冻结输入、表示配置和预期 accession 绑定在一起；任一字段
+    漂移都会使检查点不可复用。
+    """
+
     old_database_name: str
     new_database_name: str
     manifest_sha256: str
@@ -79,6 +89,12 @@ class RunContract:
 
 @dataclasses.dataclass(frozen=True)
 class SuccessRecord:
+    """Digest-backed evidence that one accession completed reprocessing.
+
+    中文：一条成功记录同时绑定原始文件与生成 chunk 的摘要，防止恢复时只凭 accession
+    名称跳过错误版本。
+    """
+
     accession: str
     raw_sha256: str
     chunk_count: int
@@ -99,6 +115,11 @@ class SuccessRecord:
 
 @dataclasses.dataclass(frozen=True)
 class CheckpointState:
+    """Validated checkpoint header, completed records, and hash-chain tail.
+
+    中文：解析后的检查点状态；它只在每条哈希链记录及运行契约均通过时存在。
+    """
+
     contract: RunContract
     records: tuple[SuccessRecord, ...]
     last_entry_sha256: str

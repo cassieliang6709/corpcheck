@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Deterministic IR evaluation of the retrieval stage against FinanceBench.
 
+中文：仅测量检索是否取回正确来源的证据，不掺入 HTTP 服务或 LLM 生成；文档门控与
+重叠规则保持固定，才能让不同检索配置的分数可比较。
+
 Calls :func:`corpcheck.retrieval.retrieve` in-process — no HTTP server, no LLM.
 What is measured is purely whether the retriever surfaces the gold evidence, so
 a change in the numbers is attributable to retrieval and nothing else.
@@ -417,6 +420,10 @@ def write_run(
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse retrieval-evaluation options without issuing retrieval requests.
+
+    中文：只声明本次实验配置；数据库、数据集和模型依赖在运行阶段按原有规则验证。
+    """
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -455,6 +462,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Execute the retrieval-only evaluation and return its CLI status.
+
+    中文：入口不混入 LLM 生成；无法获得可比较检索结果时应失败而非写入误导性报告。
+    """
     args = parse_args(argv)
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper(), logging.INFO),

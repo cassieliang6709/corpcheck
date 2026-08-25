@@ -4,6 +4,9 @@ The strategy is intentionally conservative:
 - no dynamic scoring models,
 - no retrieval re-ranking beyond existing `retrieve()`,
 - no fuzzy entailment, only lexical + numeric heuristics.
+
+中文：核验器不用模糊语义猜测。数值必须绑定指标和可比单位；期间检查目前只在
+双方都有财年时排除年份冲突，不比较季度，缺失期间元数据会记录为待补义务。
 """
 
 from __future__ import annotations
@@ -64,6 +67,10 @@ _STOP_WORDS = {
 }
 
 def _short_text(text: str, limit: int = 260) -> str:
+    """Trim a long excerpt symmetrically while preserving its two ends.
+
+    中文：无精确匹配位置时仍给人工审核保留上下文两端，而不是只截取开头。
+    """
     if len(text) <= limit:
         return text
     half = max(1, (limit - 3) // 2)
@@ -76,6 +83,8 @@ def _excerpt_around(text: str, start: int, end: int, width: int = 220) -> str:
     A receipt whose excerpt does not contain the number it claims to bind is
     useless to a human reviewer, so the window follows the match rather than
     always quoting the head of the chunk.
+
+    中文：证据摘录必须包含被比较的数字，因此窗口围绕匹配位置而非固定从文本开头截取。
     """
     if not text:
         return ""
@@ -101,6 +110,8 @@ def _bound_metric(
     Pure nearest-mention binding is a coin flip on the very common
     "net sales were $383.3 billion and net income was $97.0 billion", where the
     next metric's name sits fewer characters away than the owning one.
+
+    中文：财务文本通常先给指标再给数值，故优先选择最近的前置指标；这比纯距离匹配更不易错绑。
     """
     before: Optional[tuple[int, str]] = None
     after: Optional[tuple[int, str]] = None
@@ -133,6 +144,8 @@ def _is_change_amount(text: str, start: int) -> bool:
     balance. Scoring it against a claimed level produces a false refutation.
     "increased to $383.3 billion" is excluded, since there the number *is* the
     resulting level.
+
+    中文：变化额不能反驳余额类声明；但“增至”后的结果数值仍可作为余额证据。
     """
     window = text[max(0, start - _CHANGE_WINDOW):start].lower()
     match = None
@@ -146,6 +159,10 @@ def _is_change_amount(text: str, start: int) -> bool:
 
 
 def _to_floatish(value: Decimal) -> float:
+    """Convert only for the relative-tolerance comparison below.
+
+    中文：主要比较仍保留 Decimal 精度；此转换仅服务于微小的相对误差阈值。
+    """
     return float(value)
 
 
@@ -153,6 +170,10 @@ _CURRENCY_MARKS = ("$", "¥", "€", "£", "dollar", "usd", "美元")
 
 
 def _is_monetary(text: str) -> bool:
+    """Detect whether a raw numeric expression carries a currency marker.
+
+    中文：金额和股数即使单位倍率相同也不可互证，因此单独保留货币维度。
+    """
     lowered = text.lower()
     return any(mark in lowered for mark in _CURRENCY_MARKS)
 
@@ -163,6 +184,8 @@ def _comparable_units(claim_unit: Optional[str], candidate_unit: Optional[str]) 
     Financial prose is full of bare integers — week counts, note numbers,
     segment counts. Without this check "fiscal year 2023 spanned 53 weeks"
     becomes counter-evidence against a revenue figure.
+
+    中文：先保证量纲相同，再比较大小；防止周数、股数等裸整数与金额互相误判。
     """
     claim_scaled = claim_unit in _UNIT_SCALE
     candidate_scaled = candidate_unit in _UNIT_SCALE
@@ -180,6 +203,8 @@ def _rounding_tolerance(expected: Decimal, unit: Optional[str]) -> Decimal:
     saying "$383,285 million"; it is the same number quoted to fewer digits.
     Comparing at the claim's own stated precision keeps that from being scored
     as a refutation, without loosening into a blanket percentage tolerance.
+
+    中文：容差取自声明的书写精度，而不是统一按百分比放宽，兼顾四舍五入与严格性。
     """
     scale = _UNIT_SCALE.get(unit or "", Decimal("1"))
     stated = expected / scale if scale != 0 else expected
@@ -193,6 +218,10 @@ def _rounding_tolerance(expected: Decimal, unit: Optional[str]) -> Decimal:
 
 
 def _numeric_equal(a: Decimal, b: Decimal, tolerance: Decimal = Decimal("0")) -> bool:
+    """Compare exact Decimal values with optional stated-precision tolerance.
+
+    中文：先使用显式容差，再允许极小的浮点式相对误差以处理计算路径差异。
+    """
     delta = abs(a - b)
     if tolerance > 0 and delta <= tolerance:
         return True
@@ -206,6 +235,10 @@ def _numeric_compare(
     comparator: Optional[str],
     tolerance: Decimal = Decimal("0"),
 ) -> bool:
+    """Evaluate the claim's equality or inequality operator against evidence.
+
+    中文：无比较符默认相等；未知操作符安全地回退为相等性检查。
+    """
     if comparator in {None, "eq"}:
         return _numeric_equal(actual, expected, tolerance)
     if comparator == "gt":
@@ -220,6 +253,10 @@ def _numeric_compare(
 
 
 def _as_chunk_list(chunks: Iterable[Any]) -> list[ChunkResult]:
+    """Normalize dict-like test or retrieval payloads into ``ChunkResult`` values.
+
+    中文：边界兼容字典和模型实例，后续核验逻辑只面对一种类型。
+    """
     return [
         chunk if isinstance(chunk, ChunkResult) else ChunkResult(**chunk)
         for chunk in chunks
@@ -233,6 +270,10 @@ def _evidence_from_chunk(
     unit: Optional[str] = None,
     span: Optional[tuple[int, int]] = None,
 ) -> EvidenceItem:
+    """Create an auditable evidence receipt from one retrieved chunk.
+
+    中文：若已知数字位置则提取邻近片段，否则保留缩短后的整段摘要。
+    """
     excerpt = (
         _excerpt_around(chunk.text, span[0], span[1])
         if span is not None
@@ -255,6 +296,8 @@ def _is_after_cutoff(chunk: ChunkResult, claim: FinancialClaim) -> bool:
     Filing date is checked at day granularity when available; fiscal year is
     only a fallback, because a same-fiscal-year filing published months after
     ``as_of`` is still future information the claim's author could not have had.
+
+    中文：优先用提交日期阻止“事后知识”；没有日期时才以财年作较粗的回退。
     """
     if claim.as_of is None:
         return False
@@ -266,7 +309,10 @@ def _is_after_cutoff(chunk: ChunkResult, claim: FinancialClaim) -> bool:
 
 
 def _period_mismatch(chunk: ChunkResult, period: Optional[tuple[int, Optional[int]]]) -> bool:
-    """True when the chunk provably covers a different fiscal period."""
+    """Return true only when metadata proves the chunk covers another period.
+
+    中文：未知期间不是不匹配的证据；调用方会记录缺失元数据而不是静默丢弃。
+    """
     if period is None:
         return False
     year, _quarter = period
@@ -278,6 +324,10 @@ def _period_mismatch(chunk: ChunkResult, period: Optional[tuple[int, Optional[in
 
 
 def _keyword_overlap(a: str, b: str) -> float:
+    """Return asymmetric meaningful-token coverage from claim text to evidence text.
+
+    中文：非数值声明只能获得词面支持，不能因词面不同被判为反驳。
+    """
     a_tokens = {t for t in a.lower().split() if t and t not in _STOP_WORDS}
     b_tokens = {t for t in b.lower().split() if t and t not in _STOP_WORDS}
     if not a_tokens:
@@ -291,6 +341,11 @@ def _verify_with_chunk_set(
     claim: FinancialClaim,
     chunks: list[ChunkResult],
 ) -> ClaimVerdict:
+    """Verify one normalized claim against its already-retrieved candidate chunks.
+
+    中文：该函数不负责检索；它按可验证性、截止时间、可用的财年信息、指标绑定
+    和数值比较生成裁决。缺失期间信息不会单独阻止 ``verified``。
+    """
     if claim.checkability == "non_verifiable":
         return ClaimVerdict(
             claim_id=claim.claim_id,
@@ -435,6 +490,8 @@ def verify_claims(
 
     ``retrieve_chunks`` is intentionally a sequence of per-claim chunk lists in the
     same order as claims, making this function easy to test with monkeypatches.
+
+    中文：每条声明对应一组已检索证据，保持顺序配对让批量调用和测试都可复现。
     """
     verdicts: list[ClaimVerdict] = []
     obligations: list[str] = []

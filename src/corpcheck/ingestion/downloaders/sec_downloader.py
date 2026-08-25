@@ -7,6 +7,9 @@ processing.
 
 Rate limiting is enforced via an asyncio Semaphore (max 10 req/s as required
 by EDGAR's fair-use policy).
+
+中文：该模块负责按 SEC 规则下载并从本地文件推导 filing 元数据；下载与元数据收集分离，
+因此重跑时能复用已经落盘的文档。
 """
 
 from __future__ import annotations
@@ -55,7 +58,10 @@ FilingMeta = tuple[
 # ---------------------------------------------------------------------------
 
 def parse_sec_user_agent(user_agent: str) -> tuple[str, str]:
-    """Parse the required ``ProjectName email@example.com`` SEC identity."""
+    """Parse the required ``ProjectName email@example.com`` SEC identity.
+
+    中文：SEC 要求可联系的身份标识；严格校验可在发请求前暴露错误配置。
+    """
     parts = user_agent.split()
     if len(parts) != 2:
         raise ValueError("SEC_USER_AGENT must be exactly 'ProjectName email@example.com'")
@@ -86,6 +92,8 @@ def _iter_filing_paths(
     """
     Walk *root* and yield (document_path, accession_number) for every
     primary document (htm/html/txt) inside each accession sub-directory.
+
+    中文：优先选择最大的 HTML 文件，缺失时回退到完整 submission 文本；不解析文件内容。
     """
     if not root.exists():
         return
@@ -128,6 +136,8 @@ def _download_limit_for_range(filing_type: str, years: list[int]) -> int:
     limit of 20 silently misses filings once the window exceeds roughly
     6 years. We intentionally over-allocate here so 2018-2025 local backfills
     collect the full on-disk set in one pass.
+
+    中文：这是请求上限的安全估计，而不是公司实际披露数量的断言；宁可多取也不能静默漏档。
     """
     year_count = max(1, len(set(years)))
     if filing_type == "10-Q":
@@ -140,6 +150,8 @@ def _download_limit_for_range(filing_type: str, years: list[int]) -> int:
 def _parse_submission_metadata(accession_dir: Path) -> dict[str, str]:
     """
     Parse SEC header metadata from ``full-submission.txt``.
+
+    中文：只读取文件开头的 EDGAR header；缺文件或不可读时返回空字典，供调用方决定兜底。
     """
     submission_path = accession_dir / "full-submission.txt"
     if not submission_path.exists():
@@ -201,6 +213,8 @@ def _turns_over_new_year(report_date: dt.date, fy_end: tuple[int, int] | None) -
     (WMT, CRM) or even ``0201`` (TGT, TJX, whose 52/53-week year can end in early
     February) and are named after the calendar year they close in -- treating
     those the same way would move every label back a year.
+
+    中文：这里区分跨年周历与真正偏移的财政年度，避免把 1 月初结账的 10-K 错标到下一年。
     """
     if fy_end is not None:
         return fy_end[0] == 12 or (fy_end[0] == 1 and fy_end[1] <= 14)
@@ -214,6 +228,8 @@ def _infer_fiscal_year(
 ) -> int:
     """
     Infer the filing's fiscal year from period-of-report and fiscal year end.
+
+    中文：以报告期而非提交日标记财年；没有报告期时返回 ``0``，明确表示不能可靠推断。
     """
     if report_date is None:
         return 0
@@ -254,6 +270,8 @@ def _infer_period(
 ) -> str:
     """
     Infer the period label for the filing.
+
+    中文：10-K 和 8-K 有固定标签；10-Q 则相对实际财政年末计算，兼容非自然年公司。
     """
     if filing_type == "10-K":
         return "annual"
@@ -302,6 +320,8 @@ class SECDownloader:
         Root directory for downloaded filings (defaults to config value).
     max_rps:
         Maximum EDGAR requests per second.
+
+    中文：封装 SEC 的礼貌限速和落盘目录约定。它返回本地文档元数据，不会在这里清洗或写库。
     """
 
     def __init__(
@@ -321,7 +341,10 @@ class SECDownloader:
     # ------------------------------------------------------------------
 
     def _rate_limit(self) -> None:
-        """Block until we are within the allowed requests-per-second budget."""
+        """Block until we are within the allowed requests-per-second budget.
+
+        中文：使用滑动的一秒窗口记录本进程请求，保证单线程下载不超过 ``max_rps``。
+        """
         now = time.monotonic()
         # Keep only requests within the last 1 second
         self._last_request_times = [
@@ -349,6 +372,8 @@ class SECDownloader:
         """
         Download filings for a single ticker/type combination.
         Already-downloaded filings are skipped automatically by the library.
+
+        中文：底层库负责跳过已有文件；本方法只负责限速和将单个请求失败降级为日志告警。
         """
         self._rate_limit()
         try:
@@ -387,6 +412,8 @@ class SECDownloader:
         -------
         list[FilingMeta]
             Each element: (ticker, filing_type, year, local_path, source_url)
+
+        中文：返回范围内磁盘上的所有文档，包括此前下载的文件，便于下游做幂等入库。
         """
         after_date = f"{min(years) - 1}-07-01"
         before_date = f"{max(years) + 1}-06-30"
@@ -420,6 +447,8 @@ class SECDownloader:
     ) -> list[FilingMeta]:
         """
         Walk the download directory and build FilingMeta tuples.
+
+        中文：从 SEC header 而非目录名恢复报告期和 CIK，并过滤到调用方指定的财年。
         """
         results: list[FilingMeta] = []
         year_set = set(years)
@@ -487,6 +516,8 @@ async def download_async(
 
     Because sec-edgar-downloader's ``get()`` is synchronous, we run it in
     a thread-pool executor.
+
+    中文：异步层只协调并发；实际下载仍调用同步库，完成后与同步接口一样重新扫描本地目录。
     """
     semaphore = asyncio.Semaphore(max_rps)
     dl = SECDownloader(download_dir=download_dir, max_rps=max_rps)

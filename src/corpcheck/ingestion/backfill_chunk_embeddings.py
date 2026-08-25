@@ -7,6 +7,8 @@ model, and updates the rows in-place.
 
 It defaults to offline Hugging Face mode so it can reuse a locally cached
 model in restricted environments.
+
+中文：这是修复工具而非日常导入阶段；它仅补齐 ``NULL`` 向量，并逐批提交以限制事务大小。
 """
 
 from __future__ import annotations
@@ -31,6 +33,10 @@ def _count_missing_chunks(
     conn: psycopg2.extensions.connection,
     limit: int | None = None,
 ) -> int:
+    """Count NULL embeddings, optionally within the same ordered limit as the worker.
+
+    中文：计数与后续按 ID 的批处理使用相同边界，进度日志不会把超出 ``limit`` 的行算进去。
+    """
     with conn.cursor() as cur:
         if limit is None:
             cur.execute("SELECT COUNT(*) FROM chunks WHERE embedding IS NULL")
@@ -58,6 +64,10 @@ def _fetch_missing_chunk_batch(
     after_id: int = 0,
     remaining_limit: int | None = None,
 ) -> list[tuple[int, str]]:
+    """Fetch the next ordered batch without revisiting already committed chunk IDs.
+
+    中文：使用 ID 游标而非 OFFSET，避免批次更新后跳过或重复记录。
+    """
     sql = """
         SELECT id, content
         FROM chunks
@@ -80,6 +90,10 @@ def backfill_embeddings(
     batch_size: int,
     limit: int | None = None,
 ) -> int:
+    """Generate and persist vectors for existing chunks whose embedding is NULL.
+
+    中文：每批成功后提交，失败时仅回滚当前未提交事务；不会重写已有 embedding。
+    """
     # Prefer local cache instead of attempting a network fetch.
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -144,6 +158,10 @@ def backfill_embeddings(
 
 
 def main() -> None:
+    """Run the command-line backfill entry point.
+
+    中文：解析运维参数、配置日志并报告实际更新的 chunk 数。
+    """
     parser = argparse.ArgumentParser(description="Backfill missing chunk embeddings")
     parser.add_argument("--dsn", default=DATABASE_URL, help="PostgreSQL DSN")
     parser.add_argument(

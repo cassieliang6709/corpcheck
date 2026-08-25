@@ -4,6 +4,8 @@ Supports both Min-Max linear score blending and Reciprocal Rank Fusion (RRF).
 Reciprocal Rank Fusion evaluates document position rather than raw relevance
 magnitude, making it robust against disparate score distributions between vector
 embedding cosine similarities and BM25 BM25 text scores.
+
+中文：融合层把 dense 与 sparse 两种不可直接比较的候选分数整合为统一排序分数，不执行数据库访问。
 """
 
 from __future__ import annotations
@@ -12,7 +14,10 @@ from typing import Any
 
 
 def minmax_normalize(scores: list[float]) -> list[float]:
-    """Scale scores into [0, 1]. A degenerate (all-equal) list maps to all 1.0."""
+    """Scale scores into ``[0, 1]``; an all-equal list maps to ``1.0``.
+
+    中文：相同分数没有相对高低，因此保留为全 1.0，而不是引入任意的排序偏差。
+    """
     if not scores:
         return []
     mn = min(scores)
@@ -23,7 +28,10 @@ def minmax_normalize(scores: list[float]) -> list[float]:
 
 
 def fuse_scores(score_v: float, score_b: float, alpha: float) -> float:
-    """Linear blend of a dense and a sparse score, both assumed pre-normalised."""
+    """Linearly blend pre-normalized dense and sparse scores.
+
+    中文：``alpha`` 是 dense 权重；此函数不校验输入范围，调用方负责先规范化。
+    """
     return alpha * score_v + (1.0 - alpha) * score_b
 
 
@@ -42,6 +50,8 @@ def compute_rrf_scores(
     Ranks are 1-based indices in the pre-sorted ``vec_rows`` and ``bm25_rows``.
     If normalized is True, min-max scales output scores into [0, 1] so downstream
     additive rerank bonuses retain their relative magnitude.
+
+    中文：RRF 按各检索臂的名次累加而非原始数值，适合两种分数分布不同的候选集。
     """
     # 1-based ranks
     vec_ranks = {row["chunk_id"]: idx + 1 for idx, row in enumerate(vec_rows)}
@@ -78,6 +88,8 @@ def fuse_candidates(
     Supported strategies:
     - ``"rrf"``: Reciprocal Rank Fusion
     - ``"minmax"``: Min-Max normalisation followed by linear alpha blend
+
+    中文：这是检索管线的唯一融合入口；未知策略显式报错，避免静默选择错误算法。
     """
     strat = strategy.lower().strip()
     if strat == "rrf":

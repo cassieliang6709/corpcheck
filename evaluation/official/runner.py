@@ -1,5 +1,9 @@
 """Official benchmark execution hub (FinanceBench / FinRank / AVeriTeC).
 
+中文：正式评测的统一入口。manifest 提供计划、默认参数和输入路径，但调用方仍可
+覆盖 dataset；当前运行前检查以必需文件是否存在为主，并不验证数据内容哈希。
+smoke 模式只生成确定性演示结果，不能替代真实基准分数。
+
 Includes a lightweight ``--smoke`` mode that emits deterministic synthetic
 results for interview-ready dry-runs without requiring a live PostgreSQL
 cluster.
@@ -372,6 +376,10 @@ def run_financebench_smoke(
     fusion_strategy: Optional[str],
     label: Optional[str],
 ) -> BenchmarkResult:
+    """Emit deterministic synthetic FinanceBench smoke evidence for wiring checks.
+
+    中文：smoke 结果只验证编排与报告格式，不代表真实检索或正式基准分数。
+    """
     start = datetime.now(tz=UTC)
     rows = _read_rows(dataset)
     if limit:
@@ -661,6 +669,10 @@ def run_finrank_smoke(
     output_root: Path,
     label: Optional[str],
 ) -> BenchmarkResult:
+    """Emit deterministic FinRank smoke evidence without retrieval dependencies.
+
+    中文：此路径只验证演示运行链路，会绕过真实检索，因此不能作为正式分数。
+    """
     start = datetime.now(tz=UTC)
     rows = _read_rows(dataset)
     if limit:
@@ -783,6 +795,11 @@ def run_finrank(
     output_root: Path,
     label: Optional[str],
 ) -> BenchmarkResult:
+    """Evaluate the caller-selected FinRank dataset through the declared runner.
+
+    中文：使用调用方传入的 dataset 和参数；数据契约或检索失败应成为结果错误，
+    而不是替代分数。
+    """
     start = datetime.now(tz=UTC)
     rows = _read_rows(dataset)
     if limit:
@@ -952,6 +969,10 @@ def run_averitec_smoke(
     output_root: Path,
     label: Optional[str],
 ) -> BenchmarkResult:
+    """Emit deterministic AVeriTeC smoke evidence for orchestration validation.
+
+    中文：合成结果仅证明接口连通，不能作为 AVeriTeC 的真实性能声明。
+    """
     start = datetime.now(tz=UTC)
     rows = _read_rows(dataset)
     if limit:
@@ -1047,6 +1068,10 @@ def run_claimcheckbench_smoke(
     output_root: Path,
     label: Optional[str],
 ) -> BenchmarkResult:
+    """Emit deterministic ClaimCheckBench smoke evidence without live services.
+
+    中文：它保留结果结构以便检查编排，但不执行事实核验或生成正式指标。
+    """
     return run_averitec_smoke(
         plan,
         dataset=dataset,
@@ -1072,6 +1097,10 @@ def run_averitec(
     output_root: Path,
     label: Optional[str],
 ) -> BenchmarkResult:
+    """Evaluate caller-selected AVeriTeC rows through retrieval and claim checks.
+
+    中文：使用调用方传入的 dataset 和参数；单项错误保持记录，不能伪装为已验证结论。
+    """
     start = datetime.now(tz=UTC)
     rows = _read_rows(dataset)
     if limit:
@@ -1214,6 +1243,11 @@ def run_claimcheckbench(
 
 
 def run_plan(plan: BenchmarkPlan, args: argparse.Namespace) -> BenchmarkResult:
+    """Dispatch one declared plan through its named runner and file guards.
+
+    中文：必需文件缺失、dataset 未配置或 runner 未知时返回 ``skipped``。
+    计划状态本身不在此函数中阻止运行。
+    """
     seed = _coerce_positive_int(args.seed, default=DEFAULT_SEED)
     k = _coerce_positive_int(
         args.k,
@@ -1435,6 +1469,11 @@ def run_official_benchmarks(
     manifest: OfficialManifest,
     args: argparse.Namespace,
 ) -> list[BenchmarkResult]:
+    """Run manifest-selected plans in declaration order without altering selection rules.
+
+    中文：此调度器只遍历 manifest 已定义的计划；计划级失败会记录为结果，而不是切换到
+    未声明的 benchmark 或输入。
+    """
     results: list[BenchmarkResult] = []
     for plan in manifest.runs:
         if args.task and plan.name != args.task:
@@ -1448,6 +1487,11 @@ def run_official_benchmarks(
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse official-run options without loading datasets or writing results.
+
+    中文：参数阶段不执行 benchmark；``--dataset`` 可覆盖 manifest 路径，后续计划
+    执行器只检查当前实现支持的前置条件。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--manifest",
@@ -1486,6 +1530,11 @@ def write_run_result(
     args: argparse.Namespace,
     results: list[BenchmarkResult],
 ) -> None:
+    """Persist the structured result artifact selected by the official-run contract.
+
+    中文：写入逻辑保留正式运行的审计元数据；路径和序列化错误必须向调用方暴露，不能
+    被视作一次成功 benchmark。
+    """
     payload = {
         "generated_at_utc": datetime.now(tz=UTC).isoformat(),
         "manifest_version": manifest.version,
@@ -1504,17 +1553,29 @@ def write_run_result(
     # Keep backward compatible pointer for scripts expecting a fixed filename.
     latest = args.output_root / "results.json"
     latest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    # Alternate interview reporting target used by the execution plan.
-    eval_root = Path("evals")
-    eval_root.mkdir(parents=True, exist_ok=True)
-    eval_out = eval_root / out.name
-    eval_latest = eval_root / "results.json"
-    eval_out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    eval_latest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Only a default official run publishes the repository-level pointer.
+    # Custom output roots are isolation boundaries used by tests and ad-hoc runs.
+    # 中文：只有默认正式运行才同步仓库级结果；自定义目录不得污染项目产物。
+    if args.output_root.resolve() == DEFAULT_OUTPUT_ROOT.resolve():
+        eval_root = Path("evals")
+        eval_root.mkdir(parents=True, exist_ok=True)
+        eval_out = eval_root / out.name
+        eval_latest = eval_root / "results.json"
+        eval_out.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        eval_latest.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     print(f"wrote {out}")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Dispatch manifest plans and translate loading errors to a CLI status.
+
+    中文：manifest 加载错误返回 2，runner 的 ``failed`` 结果返回 1；``skipped``
+    会写入报告但当前仍返回成功状态。
+    """
     args = parse_args(argv)
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 

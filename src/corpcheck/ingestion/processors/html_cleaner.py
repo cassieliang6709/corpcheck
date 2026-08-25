@@ -8,6 +8,9 @@ Parses SEC EDGAR filing documents (10-K, 10-Q, 8-K) and returns a list of
      pages, signature blocks, and exhibit indexes.
   2. Detects and labels sections by their Item numbers.
   3. Maps Item numbers to human-readable names.
+
+中文：清洗器优先保留可以解释的业务正文和表格结构，去除封面、签名、展品等检索价值较低的内容；
+它是启发式解析器，无法保证恢复原始 HTML 的视觉布局。
 """
 
 from __future__ import annotations
@@ -15,10 +18,8 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Generator
 
 from bs4 import BeautifulSoup, NavigableString, Tag
-from lxml import etree
 
 from corpcheck.ingestion.processors.segment_types import CleanerSegment
 
@@ -252,6 +253,8 @@ def _map_section(item_label: str, filing_type: str, part: str | None = None) -> 
     *part* is the roman numeral of the ``PART`` heading the item appears under
     (10-Q only); it disambiguates the item numbers that Part I and Part II
     share.  Returns the raw item label if no mapping is found.
+
+    中文：10-Q 的 Part I/II 复用 Item 编号，必须结合前面的 Part 标记才能正确命名。
     """
     key = _normalize_item(item_label)
     if filing_type == "10-K":
@@ -292,6 +295,8 @@ class HTMLCleaner:
         One of '10-K', '10-Q', or '8-K'.  Affects section name mapping.
     min_section_length:
         Minimum character count for a section to be included in output.
+
+    中文：将 EDGAR 文档变为可检索段落与表格。规则优先避免错误拼接，而非追求完整的视觉还原。
     """
 
     def __init__(
@@ -323,6 +328,8 @@ class HTMLCleaner:
         The boolean marks an annual-report attachment. Attachments are considered
         only for a 10-K that explicitly incorporates an annual report by reference;
         unrelated exhibits remain excluded.
+
+        中文：只有明确引用且包含财务报表信号的附件才并入，避免把无关 Exhibit 混进主体 filing。
         """
         text = content.decode("utf-8", errors="ignore") if isinstance(content, bytes) else content
         if "<DOCUMENT>" not in text.upper():
@@ -623,6 +630,8 @@ class HTMLCleaner:
         """
         Replace HTML tables with a structured plain-text representation so
         row/column relationships survive downstream chunking and retrieval.
+
+        中文：序列化为 ``[TABLE]``、``[HEADER]`` 和 ``[ROW]`` 标记，供后续按行分块。
         """
         tables = [
             table
@@ -925,6 +934,8 @@ class HTMLCleaner:
         """
         Fallback section splitting for filings that do not contain standard
         ``ITEM`` headers but do have isolated title lines.
+
+        中文：标准 Item 标题不可靠时才启用，宁愿退回完整文档也不把普通句子误认作标题。
         """
         lines = text.splitlines(keepends=True)
         if not lines:
@@ -968,6 +979,8 @@ class HTMLCleaner:
         (section_name, section_text) tuples.
 
         Consecutive matches to the same section label are merged.
+
+        中文：优先按 SEC Item 切分；只有标题缺失或明显太晚出现时才切换到保守的通用标题规则。
         """
         matches = list(_ITEM_HEADER_RE.finditer(text))
         if matches:
@@ -1020,7 +1033,10 @@ class HTMLCleaner:
     # ------------------------------------------------------------------
 
     def _clean_content_segments(self, content: str | bytes) -> list[CleanerSegment]:
-        """Clean one already-selected filing document into retrieval segments."""
+        """Clean one already-selected filing document into retrieval segments.
+
+        中文：阶段顺序固定为解析、去噪、保留表格、提取文本、移除样板、分 section，再生成段。
+        """
         soup = self._load_soup(content)
         self._strip_xbrl(soup)
         self._strip_noise(soup)
@@ -1055,6 +1071,8 @@ class HTMLCleaner:
         -------
         list[CleanerSegment]
             Content-aware segments for downstream chunking.
+
+        中文：文件不存在或读取失败时记录错误并返回空列表，允许批量处理继续。
         """
         path = Path(file_path)
         if not path.exists():
@@ -1097,6 +1115,8 @@ class HTMLCleaner:
     def clean(self, file_path: str | Path) -> list[tuple[str, str]]:
         """
         Backward-compatible wrapper returning section/text tuples.
+
+        中文：旧调用方只需要文本时使用；新代码应优先使用 ``clean_segments`` 保留结构信息。
         """
         return [
             (segment.section_name, segment.text)
@@ -1111,6 +1131,8 @@ class HTMLCleaner:
         """
         Clean HTML provided as a string/bytes rather than a file path.
         Useful for in-memory processing.
+
+        中文：传入 ``filing_type`` 会更新当前清洗器实例的类型，复用实例时调用方需注意该状态。
         """
         if filing_type:
             self.filing_type = filing_type.upper()
@@ -1128,6 +1150,10 @@ class HTMLCleaner:
         return segments
 
     def clean_text(self, raw_html: str | bytes, filing_type: str | None = None) -> list[tuple[str, str]]:
+        """Return legacy section/text tuples for HTML already held in memory.
+
+        中文：这是 ``clean_text_segments`` 的兼容包装，会丢弃结构化元数据。
+        """
         return [
             (segment.section_name, segment.text)
             for segment in self.clean_text_segments(raw_html, filing_type=filing_type)
@@ -1142,7 +1168,10 @@ def clean_filing(
     file_path: str | Path,
     filing_type: str = "10-K",
 ) -> list[tuple[str, str]]:
-    """Clean a single filing and return (section_name, text) tuples."""
+    """Clean a single filing and return (section_name, text) tuples.
+
+    中文：模块级便捷入口；需要调整最小 section 长度或读取结构信息时请使用 ``HTMLCleaner``。
+    """
     cleaner = HTMLCleaner(filing_type=filing_type)
     return cleaner.clean(file_path)
 

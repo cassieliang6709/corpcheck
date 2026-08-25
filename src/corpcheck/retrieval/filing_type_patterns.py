@@ -1,3 +1,8 @@
+"""Regular expressions for explicit SEC filing-type mentions.
+
+中文：这些模式只识别用户明确提及的文件类型；较弱的年度/季度提示由查询解析模块单独处理。
+"""
+
 import re
 
 FILING_TYPE_PATTERNS: dict[str, re.Pattern[str]] = {

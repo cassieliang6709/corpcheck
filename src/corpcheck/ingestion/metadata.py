@@ -1,5 +1,8 @@
 """
 Shared company metadata resolution helpers.
+
+中文：把外部市场数据的宽松字段归一为项目需要的公司元数据，并在网络数据缺失时回退到
+受版本控制的配置表。
 """
 
 from __future__ import annotations
@@ -75,7 +78,10 @@ _SECTOR_KEYWORDS: dict[str, tuple[str, ...]] = {
 
 
 def _clean_string(value: Any) -> str | None:
-    """Return a stripped string or ``None`` when the value is empty-like."""
+    """Return a stripped string or ``None`` when the value is empty-like.
+
+    中文：统一处理供应商可能返回的 ``None``、空白或字符串化空值。
+    """
     if value is None:
         return None
     text = str(value).strip()
@@ -91,6 +97,8 @@ def _is_unresolved_sector(value: str | None) -> bool:
 def _classify_sector(*values: str | None) -> str | None:
     """
     Map upstream sector/industry text into the project's coarse taxonomy.
+
+    中文：上游行业标签不稳定，因此只映射到项目定义的粗粒度行业；未知文本保持未解析状态。
     """
     haystack = " ".join(v.lower() for v in values if v).strip()
     if not haystack:
@@ -106,6 +114,8 @@ def _classify_sector(*values: str | None) -> str | None:
 def fetch_upstream_company_metadata(ticker: str) -> dict[str, Any]:
     """
     Fetch raw company metadata for *ticker* from yfinance.
+
+    中文：网络或供应商错误被转换为空字典，让调用方能使用本地兜底数据继续执行。
     """
     try:
         info = yf.Ticker(ticker).info or {}
@@ -121,6 +131,8 @@ def resolve_company_metadata(
     """
     Resolve company metadata for *ticker* using upstream data first, with
     curated config values as fallback.
+
+    中文：优先使用上游的公司名与描述，行业则标准化为项目枚举；不会修改传入的 ``info``。
     """
     upstream = info if info is not None else fetch_upstream_company_metadata(ticker)
 
@@ -145,7 +157,10 @@ def resolve_company_metadata(
 
 
 def is_unresolved_company_name(name: str | None, ticker: str) -> bool:
-    """Return whether *name* is missing or still ticker-like."""
+    """Return whether *name* is missing or still ticker-like.
+
+    中文：ticker 本身不是可展示的公司名，因此也视为未解析。
+    """
     cleaned_name = _clean_string(name)
     if cleaned_name is None:
         return True
@@ -153,5 +168,8 @@ def is_unresolved_company_name(name: str | None, ticker: str) -> bool:
 
 
 def is_unresolved_sector(sector: str | None) -> bool:
-    """Return whether *sector* is empty-like or unknown."""
+    """Return whether *sector* is empty-like or unknown.
+
+    中文：仅判断缺失状态，不尝试在此函数中重新分类。
+    """
     return _is_unresolved_sector(_clean_string(sector))

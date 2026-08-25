@@ -1,4 +1,8 @@
-"""Manifest parsing for official benchmark orchestration."""
+"""Manifest parsing for official benchmark orchestration.
+
+中文：把正式评测清单解析为受约束的计划对象；这里保留状态、输入与默认参数的显式
+声明，缺失或无效字段必须在运行前暴露。
+"""
 
 from __future__ import annotations
 
@@ -15,7 +19,10 @@ except Exception:  # pragma: no cover - optional; used only in CLI execution pat
 
 @dataclass(frozen=True)
 class BenchmarkPlan:
-    """Single benchmark entry from ``benchmark_manifest.yaml``."""
+    """Single benchmark entry from ``benchmark_manifest.yaml``.
+
+    中文：一个受 manifest 约束的 benchmark 声明；其状态和所需输入决定能否安全执行。
+    """
 
     name: str
     status: str
@@ -28,12 +35,19 @@ class BenchmarkPlan:
 
     @property
     def is_planned(self) -> bool:
+        """Whether this plan is intentionally not executable yet.
+
+        中文：统一识别清单中的待办状态，调用方据此避免把尚未准备的评测当作已运行。
+        """
         return self.status.lower() in {"planned", "todo", "pending"}
 
 
 @dataclass(frozen=True)
 class BenchmarkResult:
-    """Structured run result persisted by ``runner.py``."""
+    """Structured run result persisted by ``runner.py``.
+
+    中文：正式运行的可审计结果载体，保留配置、耗时和失败信息而非只保存单一分数。
+    """
 
     task: str
     status: str
@@ -46,13 +60,20 @@ class BenchmarkResult:
 
 @dataclass(frozen=True)
 class OfficialManifest:
-    """Top-level manifest object with benchmark definitions."""
+    """Top-level manifest object with benchmark definitions.
+
+    中文：正式评测计划的唯一解析结果；runner 不应根据目录内容自行发现替代任务。
+    """
 
     version: str
     created_at_utc: str
     runs: list[BenchmarkPlan]
 
     def get(self, name: str) -> Optional[BenchmarkPlan]:
+        """Return the exact named plan, or ``None`` when the manifest lacks it.
+
+        中文：名称查询不做模糊匹配，调用方可据此把拼写或清单遗漏当成显式失败。
+        """
         for run in self.runs:
             if run.name == name:
                 return run
